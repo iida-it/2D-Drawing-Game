@@ -84,7 +84,7 @@ export function exportBlueprintPng(
   ctx.translate(offsetX, offsetY);
   ctx.scale(scale, scale);
 
-  // Draw Rooms Fill
+  // Draw Rooms Fill with Pastel Colors
   const rooms = detectClosedRooms(nodes, walls, settings.scaleFactor);
   rooms.forEach((r) => {
     ctx.beginPath();
@@ -93,14 +93,32 @@ export function exportBlueprintPng(
       else ctx.lineTo(pt.x, pt.y);
     });
     ctx.closePath();
-    ctx.fillStyle = 'rgba(2, 132, 199, 0.08)';
+    ctx.fillStyle = r.fillColor;
     ctx.fill();
+    ctx.strokeStyle = r.borderColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    // Centered area tag
-    ctx.fillStyle = '#0369a1';
-    ctx.font = '600 13px "Fira Code", monospace';
+    // Centered room badge
+    const badgeW = 120;
+    const badgeH = 42;
+    ctx.fillStyle = r.tagBgColor;
+    ctx.beginPath();
+    ctx.roundRect(r.centroid.x - badgeW / 2, r.centroid.y - badgeH / 2, badgeW, badgeH, 6);
+    ctx.fill();
+    ctx.strokeStyle = r.borderColor;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = r.tagTextColor;
+    ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(`${r.areaMetersSq.toFixed(2)} m²`, r.centroid.x, r.centroid.y);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(r.name.toUpperCase(), r.centroid.x, r.centroid.y - 8);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '700 13px "Fira Code", monospace';
+    ctx.fillText(`${r.areaMetersSq.toFixed(2)} m²`, r.centroid.x, r.centroid.y + 9);
   });
 
   // Draw Walls

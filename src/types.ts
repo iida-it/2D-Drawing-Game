@@ -16,13 +16,21 @@ export interface Wall {
   thickness?: number; // In meters, default 0.15m (15cm)
 }
 
+export type RoomType = 'living' | 'bedroom' | 'kitchen' | 'bathroom' | 'office' | 'dining';
+
 export interface ClosedRoom {
   id: string;
+  name: string;
+  roomType: RoomType;
   nodeIds: string[];
   points: Point[];
   areaMetersSq: number;
+  perimeterMeters: number;
   centroid: Point;
-  label?: string;
+  fillColor: string;
+  borderColor: string;
+  tagBgColor: string;
+  tagTextColor: string;
 }
 
 export type ToolType = 'select' | 'wall' | 'measure' | 'calibrate' | 'erase' | 'pan';
@@ -126,3 +134,18 @@ export interface DraftingSettings {
   scaleFactor: number; // meters per pixel (default 0.02)
   wallThicknessMeters: number; // default 0.15
 }
+
+export interface UploadedFloorPlan {
+  id: string;
+  name: string;
+  imageElement: HTMLImageElement;
+  dataUrl: string;
+  width: number;
+  height: number;
+  position: Point;
+  scale: number;
+  fileType: 'image' | 'pdf';
+  totalPages?: number;
+  currentPage?: number;
+}
+

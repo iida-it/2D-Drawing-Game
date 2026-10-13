@@ -1,4 +1,4 @@
-import { Point, Node, Wall, ClosedRoom, BlueprintLevel, ValidationResult } from '../types';
+import { Point, Node, Wall, ClosedRoom, RoomType, BlueprintLevel, ValidationResult } from '../types';
 
 /** Distance between two points in coordinate units */
 export function getDistance(p1: Point, p2: Point): number {
@@ -130,9 +130,78 @@ export function calculatePolygonArea(points: Point[], scaleFactor: number): numb
   return pixelArea * (scaleFactor * scaleFactor);
 }
 
+export const ROOM_THEMES: Record<
+  RoomType,
+  {
+    name: string;
+    fillColor: string;
+    borderColor: string;
+    tagBgColor: string;
+    tagTextColor: string;
+  }
+> = {
+  living: {
+    name: 'Living Room',
+    fillColor: 'rgba(186, 230, 253, 0.40)', // Pastel Light Blue
+    borderColor: '#0284c7',
+    tagBgColor: '#e0f2fe',
+    tagTextColor: '#0369a1',
+  },
+  bedroom: {
+    name: 'Bedroom',
+    fillColor: 'rgba(187, 247, 208, 0.40)', // Pastel Light Green
+    borderColor: '#16a34a',
+    tagBgColor: '#dcfce7',
+    tagTextColor: '#15803d',
+  },
+  kitchen: {
+    name: 'Kitchen',
+    fillColor: 'rgba(254, 240, 138, 0.40)', // Pastel Warm Yellow / Peach
+    borderColor: '#d97706',
+    tagBgColor: '#fef9c3',
+    tagTextColor: '#b45309',
+  },
+  bathroom: {
+    name: 'Bathroom',
+    fillColor: 'rgba(204, 251, 241, 0.40)', // Pastel Mint / Teal
+    borderColor: '#0d9488',
+    tagBgColor: '#ccfbf1',
+    tagTextColor: '#0f766e',
+  },
+  office: {
+    name: 'Office',
+    fillColor: 'rgba(233, 213, 255, 0.40)', // Pastel Lavender / Purple
+    borderColor: '#9333ea',
+    tagBgColor: '#f3e8ff',
+    tagTextColor: '#7e22ce',
+  },
+  dining: {
+    name: 'Dining Room',
+    fillColor: 'rgba(254, 215, 170, 0.40)', // Pastel Apricot
+    borderColor: '#ea580c',
+    tagBgColor: '#ffedd5',
+    tagTextColor: '#c2410c',
+  },
+};
+
 /**
- * Centroid of polygon
+ * Check if a 2D point is inside an arbitrary polygon (Ray-casting test)
  */
+export function isPointInPolygon(point: Point, polygon: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersect =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 export function calculateCentroid(points: Point[]): Point {
   if (points.length === 0) return { x: 0, y: 0 };
   let cx = 0;
@@ -141,10 +210,86 @@ export function calculateCentroid(points: Point[]): Point {
     cx += p.x;
     cy += p.y;
   }
-  return {
-    x: cx / points.length,
-    y: cy / points.length,
-  };
+  return { x: cx / points.length, y: cy / points.length };
+}
+
+/**
+ * True geometric centroid of arbitrary 2D polygon using Green's Theorem
+ */
+export function calculatePolygonCentroid(points: Point[]): Point {
+  if (points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1) return points[0];
+  if (points.length === 2)
+    return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+
+  let signedArea = 0;
+  let cx = 0;
+  let cy = 0;
+
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    const factor = points[i].x * points[j].y - points[j].x * points[i].y;
+    signedArea += factor;
+    cx += (points[i].x + points[j].x) * factor;
+    cy += (points[i].y + points[j].y) * factor;
+  }
+
+  signedArea *= 0.5;
+  if (Math.abs(signedArea) < 1e-4) {
+    return calculateCentroid(points);
+  }
+
+  cx = cx / (6 * signedArea);
+  cy = cy / (6 * signedArea);
+  return { x: cx, y: cy };
+}
+
+/**
+ * Canonical minimum string of a cycle to avoid duplicate cycles from different start nodes or directions
+ */
+function getCanonicalCycleKey(cycle: string[]): string {
+  const n = cycle.length;
+  let minStr = '';
+
+  for (let i = 0; i < n; i++) {
+    const rot: string[] = [];
+    for (let j = 0; j < n; j++) {
+      rot.push(cycle[(i + j) % n]);
+    }
+    const str = rot.join('|');
+    if (!minStr || str < minStr) minStr = str;
+  }
+
+  const rev = [...cycle].reverse();
+  for (let i = 0; i < n; i++) {
+    const rot: string[] = [];
+    for (let j = 0; j < n; j++) {
+      rot.push(rev[(i + j) % n]);
+    }
+    const str = rot.join('|');
+    if (str < minStr) minStr = str;
+  }
+
+  return minStr;
+}
+
+/**
+ * Automatically determine room type and pastel theme based on area and sequence
+ */
+export function getRoomTypeFromArea(
+  areaM2: number,
+  index: number,
+  totalRooms: number
+): RoomType {
+  if (areaM2 >= 18) {
+    return 'living';
+  } else if (areaM2 >= 9.5) {
+    return index % 2 === 0 ? 'bedroom' : 'office';
+  } else if (areaM2 >= 5.0) {
+    return index % 2 === 0 ? 'kitchen' : 'dining';
+  } else {
+    return 'bathroom';
+  }
 }
 
 /**
@@ -153,14 +298,15 @@ export function calculateCentroid(points: Point[]): Point {
 export function detectClosedRooms(
   nodes: Node[],
   walls: Wall[],
-  scaleFactor: number
+  scaleFactor: number,
+  customRoomTypes: Record<string, RoomType> = {}
 ): ClosedRoom[] {
   if (walls.length < 3) return [];
 
   const nodeMap = new Map<string, Node>();
   nodes.forEach((n) => nodeMap.set(n.id, n));
 
-  // Build adjacency graph
+  // Build adjacency graph with ordered neighbor lists
   const adj = new Map<string, string[]>();
   walls.forEach((w) => {
     if (!adj.has(w.startNodeId)) adj.set(w.startNodeId, []);
@@ -172,30 +318,27 @@ export function detectClosedRooms(
   const rooms: ClosedRoom[] = [];
   const visitedCycles = new Set<string>();
 
-  // Find simple cycles using DFS (limit to cycles of length 3..12 to avoid runaway complexity)
+  // Find simple cycles using DFS (cycles of length 3..14)
   function findCycles(
     currentNodeId: string,
     startNodeId: string,
     path: string[],
     visited: Set<string>
   ) {
-    if (path.length > 12) return;
+    if (path.length > 14) return;
 
     const neighbors = adj.get(currentNodeId) || [];
     for (const nextId of neighbors) {
       if (path.length >= 2 && nextId === path[path.length - 2]) {
-        // Don't backtrack immediately over the wall we just traversed
         continue;
       }
 
       if (nextId === startNodeId && path.length >= 3) {
-        // Found a closed loop!
         const cycleIds = [...path];
-        // Canonical cycle string
-        const sorted = [...cycleIds].sort();
-        const cycleKey = sorted.join('-');
-        if (!visitedCycles.has(cycleKey)) {
-          visitedCycles.add(cycleKey);
+        const canonicalKey = getCanonicalCycleKey(cycleIds);
+
+        if (!visitedCycles.has(canonicalKey)) {
+          visitedCycles.add(canonicalKey);
 
           const points = cycleIds
             .map((id) => nodeMap.get(id))
@@ -203,14 +346,32 @@ export function detectClosedRooms(
             .map((n) => ({ x: n.x, y: n.y }));
 
           const areaM2 = calculatePolygonArea(points, scaleFactor);
-          // Filter out degenerate zero-area or tiny sliver polygons (< 0.2 m²)
-          if (areaM2 >= 0.2) {
+
+          // Calculate perimeter
+          let perimeterM = 0;
+          for (let pIdx = 0; pIdx < points.length; pIdx++) {
+            const nextP = points[(pIdx + 1) % points.length];
+            perimeterM += pixelsToMeters(getDistance(points[pIdx], nextP), scaleFactor);
+          }
+
+          // Filter out tiny sliver polygons (< 0.2 m²)
+          if (areaM2 >= 0.25) {
+            const roomId = `room-${rooms.length + 1}`;
+            const centroid = calculatePolygonCentroid(points);
+
             rooms.push({
-              id: `room-${rooms.length + 1}`,
+              id: roomId,
+              name: '',
+              roomType: 'living', // Will be classified after sorting
               nodeIds: cycleIds,
               points,
-              areaMetersSq: areaM2,
-              centroid: calculateCentroid(points),
+              areaMetersSq: Math.round(areaM2 * 100) / 100,
+              perimeterMeters: Math.round(perimeterM * 100) / 100,
+              centroid,
+              fillColor: '',
+              borderColor: '',
+              tagBgColor: '',
+              tagTextColor: '',
             });
           }
         }
@@ -233,10 +394,49 @@ export function detectClosedRooms(
     findCycles(startId, startId, [startId], visited);
   }
 
-  // Sort rooms by area ascending (inner rooms first, then outer bounds)
+  // Sort rooms by area ascending (inner partitions first)
   rooms.sort((a, b) => a.areaMetersSq - b.areaMetersSq);
 
-  return rooms;
+  // If there are multiple rooms, filter out outer envelop union cycle if composite
+  // (e.g. if room A + room B = room C envelope, drop room C so only individual rooms are shaded)
+  const filteredRooms: ClosedRoom[] = [];
+  for (let i = 0; i < rooms.length; i++) {
+    const r = rooms[i];
+    // Check if this larger room completely covers the union of smaller rooms
+    let isCompositeUnion = false;
+    if (i > 0 && r.areaMetersSq > 2.0) {
+      const sumSmaller = filteredRooms.reduce((sum, fr) => sum + fr.areaMetersSq, 0);
+      if (filteredRooms.length >= 2 && Math.abs(r.areaMetersSq - sumSmaller) < 0.5) {
+        isCompositeUnion = true;
+      }
+    }
+    if (!isCompositeUnion) {
+      filteredRooms.push(r);
+    }
+  }
+
+  // Assign Room Types & Pastel Color Themes
+  const typeCount: Record<string, number> = {};
+
+  filteredRooms.forEach((r, idx) => {
+    const roomType =
+      customRoomTypes[r.id] ||
+      getRoomTypeFromArea(r.areaMetersSq, idx, filteredRooms.length);
+    const theme = ROOM_THEMES[roomType];
+
+    typeCount[roomType] = (typeCount[roomType] || 0) + 1;
+    const count = typeCount[roomType];
+    const roomDisplayName = count > 1 ? `${theme.name} ${count}` : theme.name;
+
+    r.roomType = roomType;
+    r.name = roomDisplayName;
+    r.fillColor = theme.fillColor;
+    r.borderColor = theme.borderColor;
+    r.tagBgColor = theme.tagBgColor;
+    r.tagTextColor = theme.tagTextColor;
+  });
+
+  return filteredRooms;
 }
 
 /**

@@ -7,6 +7,8 @@ import {
   BlueprintLevel,
   DraftingSettings,
   ClosedRoom,
+  UploadedFloorPlan,
+  RoomType,
 } from '../types';
 import {
   getDistance,
@@ -18,17 +20,23 @@ import {
   metersToPixels,
   formatMeters,
   detectClosedRooms,
+  isPointInPolygon,
 } from '../utils/geometry';
 import { soundEngine } from '../utils/audio';
 
 interface Canvas2DProps {
   currentLevel: BlueprintLevel;
+  customFloorPlan?: UploadedFloorPlan | null;
   nodes: Node[];
   walls: Wall[];
   activeTool: ToolType;
   settings: DraftingSettings;
   selectedWallId: string | null;
   onSelectWall: (wallId: string | null) => void;
+  selectedRoomId?: string | null;
+  onSelectRoom?: (roomId: string | null) => void;
+  customRoomTypes?: Record<string, RoomType>;
+  onCycleRoomType?: (roomId: string) => void;
   onAddWall: (startNode: Node, endNode: Node) => void;
   onUpdateNodePosition: (nodeId: string, newPos: Point) => void;
   onDeleteWall: (wallId: string) => void;
@@ -47,12 +55,17 @@ interface ProcessedPointResult {
 
 export const Canvas2D: React.FC<Canvas2DProps> = ({
   currentLevel,
+  customFloorPlan,
   nodes,
   walls,
   activeTool,
   settings,
   selectedWallId,
   onSelectWall,
+  selectedRoomId,
+  onSelectRoom,
+  customRoomTypes = {},
+  onCycleRoomType,
   onAddWall,
   onUpdateNodePosition,
   onDeleteWall,
@@ -69,6 +82,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   const [cursorWorldPos, setCursorWorldPos] = useState<Point>({ x: 0, y: 0 });
   const [hoveredNode, setHoveredNode] = useState<Node | null>(null);
   const [hoveredWall, setHoveredWall] = useState<Wall | null>(null);
+  const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -78,17 +92,18 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   // Moving node in select mode
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
 
-  // Tape Measure tool state
+  // Tape Measure & Calibration tool state
   const [measureStartPoint, setMeasureStartPoint] = useState<Point | null>(null);
+  const [calibratePointA, setCalibratePointA] = useState<Point | null>(null);
 
   // Closed rooms for visual fills
   const [closedRooms, setClosedRooms] = useState<ClosedRoom[]>([]);
 
   // Update closed rooms whenever geometry changes
   useEffect(() => {
-    const rooms = detectClosedRooms(nodes, walls, settings.scaleFactor);
+    const rooms = detectClosedRooms(nodes, walls, settings.scaleFactor, customRoomTypes);
     setClosedRooms(rooms);
-  }, [nodes, walls, settings.scaleFactor]);
+  }, [nodes, walls, settings.scaleFactor, customRoomTypes]);
 
   // Coordinate Conversion: Screen to World
   const screenToWorld = useCallback(
@@ -245,20 +260,53 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       ctx.save();
       ctx.globalAlpha = settings.ghostOpacity;
 
-      // Draw Blueprint Reference Rooms / Floor Base
-      currentLevel.referenceRooms.forEach((r) => {
-        ctx.beginPath();
-        r.polygon.forEach((pt, idx) => {
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(238, 246, 255, 0.75)';
-        ctx.fill();
-        ctx.strokeStyle = '#93c5fd';
+      if (customFloorPlan) {
+        // Draw uploaded 2D floor plan image or PDF render
+        const img = customFloorPlan.imageElement;
+        const w = customFloorPlan.width * customFloorPlan.scale;
+        const h = customFloorPlan.height * customFloorPlan.scale;
+        const x = customFloorPlan.position.x;
+        const y = customFloorPlan.position.y;
+
+        // Clean white paper backing so transparent PNGs/SVGs render crisply
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y, w, h);
+
+        try {
+          ctx.drawImage(img, x, y, w, h);
+        } catch {
+          // Image draw fallback
+        }
+
+        // Blueprint technical border & frame
+        ctx.strokeStyle = '#0284c7';
         ctx.lineWidth = 1.5 / zoom;
-        ctx.stroke();
-      });
+        ctx.strokeRect(x, y, w, h);
+
+        // Header technical label
+        ctx.fillStyle = '#0284c7';
+        ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+        ctx.textAlign = 'left';
+        ctx.fillText(
+          `REFERENCE: ${customFloorPlan.name} (${customFloorPlan.width}×${customFloorPlan.height})`,
+          x,
+          y - 8 / zoom
+        );
+      } else {
+        // Draw Built-in Blueprint Reference Rooms / Floor Base
+        currentLevel.referenceRooms.forEach((r) => {
+          ctx.beginPath();
+          r.polygon.forEach((pt, idx) => {
+            if (idx === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+          });
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(238, 246, 255, 0.75)';
+          ctx.fill();
+          ctx.strokeStyle = '#93c5fd';
+          ctx.lineWidth = 1.5 / zoom;
+          ctx.stroke();
+        });
 
       // Reference Walls (Blueprint Cyan/Indigo Double lines)
       currentLevel.referenceWalls.forEach((rw) => {
@@ -380,6 +428,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         ctx.font = `500 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
         ctx.fillText(rl.targetDim, rl.x, rl.y + 14 / zoom);
       });
+      }
 
       ctx.restore();
     }
@@ -390,44 +439,70 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     // 2A: Closed Rooms Polygons Fill & Area Label
     closedRooms.forEach((r) => {
+      const isHovered = hoveredRoomId === r.id;
+      const isSelected = selectedRoomId === r.id;
+
+      // Draw Polygon Path
       ctx.beginPath();
       r.points.forEach((pt, i) => {
         if (i === 0) ctx.moveTo(pt.x, pt.y);
         else ctx.lineTo(pt.x, pt.y);
       });
       ctx.closePath();
-      // Subtle architectural room tint
-      ctx.fillStyle = 'rgba(2, 132, 199, 0.08)';
+
+      // Translucent Pastel Fill (e.g., light blue for Living Room, light green for Bedroom)
+      ctx.fillStyle = isSelected
+        ? r.fillColor.replace('0.40', '0.62')
+        : isHovered
+        ? r.fillColor.replace('0.40', '0.52')
+        : r.fillColor;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(2, 132, 199, 0.3)';
-      ctx.lineWidth = 1 / zoom;
+
+      // Translucent boundary stroke
+      ctx.strokeStyle = isSelected ? r.borderColor : isHovered ? r.borderColor : r.borderColor + '99';
+      ctx.lineWidth = (isSelected ? 2.5 : isHovered ? 2.0 : 1.5) / zoom;
       ctx.stroke();
 
-      // Room Area Badge
-      const text = `${r.areaMetersSq.toFixed(2)} m²`;
-      ctx.font = `600 ${Math.max(11, 12 / zoom)}px "Fira Code", monospace`;
-      const textMetrics = ctx.measureText(text);
-      const badgeW = textMetrics.width + 16 / zoom;
-      const badgeH = 22 / zoom;
+      // Centered Architectural Room Badge (Inside Room Center)
+      const roomTitle = r.name.toUpperCase();
+      const areaText = `${r.areaMetersSq.toFixed(2)} m²`;
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.font = `700 ${Math.max(9, 10 / zoom)}px "Plus Jakarta Sans", sans-serif`;
+      const titleMetrics = ctx.measureText(roomTitle);
+
+      ctx.font = `700 ${Math.max(11, 12 / zoom)}px "Fira Code", monospace`;
+      const areaMetrics = ctx.measureText(areaText);
+
+      const maxTextWidth = Math.max(titleMetrics.width, areaMetrics.width);
+      const padX = 14 / zoom;
+      const badgeW = maxTextWidth + padX * 2;
+      const badgeH = 38 / zoom;
+
+      const badgeX = r.centroid.x - badgeW / 2;
+      const badgeY = r.centroid.y - badgeH / 2;
+
+      // Badge Card Background (Crisp rounded card with subtle shadow)
+      ctx.fillStyle = r.tagBgColor;
       ctx.beginPath();
-      ctx.roundRect(
-        r.centroid.x - badgeW / 2,
-        r.centroid.y - badgeH / 2,
-        badgeW,
-        badgeH,
-        4 / zoom
-      );
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6 / zoom);
       ctx.fill();
-      ctx.strokeStyle = '#0284c7';
-      ctx.lineWidth = 1 / zoom;
+
+      // Badge Card Border
+      ctx.strokeStyle = isSelected ? r.borderColor : isHovered ? r.borderColor : r.borderColor + '88';
+      ctx.lineWidth = (isSelected ? 2 : 1.5) / zoom;
       ctx.stroke();
 
-      ctx.fillStyle = '#0369a1';
+      // Room Name Text
+      ctx.fillStyle = r.tagTextColor;
+      ctx.font = `700 ${Math.max(9, 10 / zoom)}px "Plus Jakarta Sans", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(text, r.centroid.x, r.centroid.y);
+      ctx.fillText(roomTitle, r.centroid.x, badgeY + 12 / zoom);
+
+      // Area in m² Text
+      ctx.fillStyle = '#0f172a';
+      ctx.font = `700 ${Math.max(11, 12 / zoom)}px "Fira Code", monospace`;
+      ctx.fillText(areaText, r.centroid.x, badgeY + 26 / zoom);
     });
 
     // 2B: Player Drawn Walls
@@ -701,8 +776,56 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       ctx.fillText(label, midX, midY - 14 / zoom + mH / 2);
     }
 
+    // 2E.2: Calibration Tool Live Render
+    if (activeTool === 'calibrate' && calibratePointA) {
+      const processed = getProcessedPoint(cursorWorldPos);
+      const calibEnd = processed.point;
+
+      // High-visibility glowing amber/cyan calibration line
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2.5 / zoom;
+      ctx.setLineDash([4 / zoom, 4 / zoom]);
+      ctx.beginPath();
+      ctx.moveTo(calibratePointA.x, calibratePointA.y);
+      ctx.lineTo(calibEnd.x, calibEnd.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Start & End markers
+      [calibratePointA, calibEnd].forEach((p, idx) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6 / zoom, 0, Math.PI * 2);
+        ctx.fillStyle = idx === 0 ? '#f59e0b' : '#38bdf8';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 / zoom;
+        ctx.stroke();
+      });
+
+      const distPx = getDistance(calibratePointA, calibEnd);
+      const distM = pixelsToMeters(distPx, settings.scaleFactor);
+      const midX = (calibratePointA.x + calibEnd.x) / 2;
+      const midY = (calibratePointA.y + calibEnd.y) / 2;
+
+      const calibText = `📏 ${distPx.toFixed(1)} px (${formatMeters(distM)}) · Click 2nd Point`;
+      ctx.font = `700 ${Math.max(11, 12 / zoom)}px "Fira Code", monospace`;
+      const cMetrics = ctx.measureText(calibText);
+      const cW = cMetrics.width + 16 / zoom;
+      const cH = 22 / zoom;
+
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(midX - cW / 2, midY - 24 / zoom - cH / 2, cW, cH, 4 / zoom);
+      ctx.fill();
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(calibText, midX, midY - 24 / zoom);
+    }
+
     // 2F: Cursor Snapping Crosshairs
-    if (activeTool === 'wall' || activeTool === 'measure') {
+    if (activeTool === 'wall' || activeTool === 'measure' || activeTool === 'calibrate') {
       const processed = getProcessedPoint(cursorWorldPos, activeDrawingNode);
       if (processed.snappedNode) {
         ctx.strokeStyle = '#10b981';
@@ -743,7 +866,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     activeDrawingNode,
     cursorWorldPos,
     measureStartPoint,
+    calibratePointA,
+    customFloorPlan,
     closedRooms,
+    hoveredRoomId,
+    selectedRoomId,
     zoom,
     pan,
     getProcessedPoint,
@@ -766,6 +893,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         }
         if (measureStartPoint) {
           setMeasureStartPoint(null);
+        }
+        if (calibratePointA) {
+          setCalibratePointA(null);
         }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -856,7 +986,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
     setHoveredNode(foundNode);
 
-    // Hover detection for walls
+    // Hover detection for walls and closed room polygons
     if (!foundNode) {
       const nodeMap = new Map<string, Node>();
       nodes.forEach((n) => nodeMap.set(n.id, n));
@@ -866,7 +996,6 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         const n1 = nodeMap.get(w.startNodeId);
         const n2 = nodeMap.get(w.endNodeId);
         if (n1 && n2) {
-          // Check distance to line segment
           const distToSeg = distanceToSegment(world, n1, n2);
           if (distToSeg < 10 / zoom) {
             foundWall = w;
@@ -875,8 +1004,16 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         }
       }
       setHoveredWall(foundWall);
+
+      if (!foundWall) {
+        const room = closedRooms.find((r) => isPointInPolygon(world, r.points));
+        setHoveredRoomId(room ? room.id : null);
+      } else {
+        setHoveredRoomId(null);
+      }
     } else {
       setHoveredWall(null);
+      setHoveredRoomId(null);
     }
   };
 
@@ -909,9 +1046,16 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         soundEngine.playPencilClick();
       } else if (hoveredWall) {
         onSelectWall(hoveredWall.id);
+        if (onSelectRoom) onSelectRoom(null);
         soundEngine.playPencilClick();
+      } else if (hoveredRoomId) {
+        if (onSelectRoom) onSelectRoom(hoveredRoomId);
+        if (onCycleRoomType) onCycleRoomType(hoveredRoomId);
+        onSelectWall(null);
+        soundEngine.playWallComplete();
       } else {
         onSelectWall(null);
+        if (onSelectRoom) onSelectRoom(null);
       }
       return;
     }
@@ -997,16 +1141,17 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     // 4. CALIBRATE SCALE TOOL
     if (activeTool === 'calibrate') {
       const processed = getProcessedPoint(world);
-      if (!measureStartPoint) {
-        setMeasureStartPoint(processed.point);
+      if (!calibratePointA) {
+        setCalibratePointA(processed.point);
         soundEngine.playPencilClick();
       } else {
-        const distPx = getDistance(measureStartPoint, processed.point);
+        const distPx = getDistance(calibratePointA, processed.point);
         const distM = pixelsToMeters(distPx, settings.scaleFactor);
+        setCalibratePointA(null);
+        soundEngine.playWallComplete();
         if (onMeasuredDistance) {
           onMeasuredDistance(distM, distPx);
         }
-        setMeasureStartPoint(null);
       }
       return;
     }
@@ -1053,6 +1198,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (measureStartPoint) {
       setMeasureStartPoint(null);
     }
+    if (calibratePointA) {
+      setCalibratePointA(null);
+    }
   };
 
   // Cursor style based on active tool and state
@@ -1066,7 +1214,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (activeTool === 'erase') {
       return 'cursor-no-drop';
     }
-    if (hoveredNode || hoveredWall) {
+    if (hoveredNode || hoveredWall || hoveredRoomId) {
       return 'cursor-pointer';
     }
     return 'cursor-default';
@@ -1084,6 +1232,26 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
       />
+
+      {/* Floating Interactive Calibration Guidance Banner */}
+      {activeTool === 'calibrate' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-amber-500 text-slate-950 px-4 py-2 rounded-xl shadow-lg border border-amber-300 font-medium text-xs flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-slate-950 animate-ping shrink-0" />
+          <span>
+            {calibratePointA
+              ? 'Click Point 2 on your blueprint to finish reference measurement'
+              : 'Scale Calibration: Click Point 1 of a known dimension (e.g. 1.0m door or wall)'}
+          </span>
+          {calibratePointA && (
+            <button
+              onClick={() => setCalibratePointA(null)}
+              className="ml-2 text-[10px] bg-slate-900 text-white px-2 py-0.5 rounded-md hover:bg-slate-800 transition-colors font-mono"
+            >
+              Reset Point 1
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Bottom Status HUD: Scale, Cursor position & CAD hint */}
       <div className="absolute left-4 bottom-3 z-10 flex items-center gap-2 select-none pointer-events-none">

@@ -16,15 +16,23 @@ import {
   DraftingSettings,
   Wall,
   Node,
+  UploadedFloorPlan,
+  ClosedRoom,
+  RoomType,
 } from '../types';
-import { pixelsToMeters, getDistance, formatMeters } from '../utils/geometry';
+import { pixelsToMeters, getDistance, formatMeters, ROOM_THEMES } from '../utils/geometry';
 
 interface RightInspectorHUDProps {
   currentLevel: BlueprintLevel;
+  customFloorPlan?: UploadedFloorPlan | null;
+  onOpenUpload?: () => void;
+  onStartCalibrationTool?: () => void;
   liveValidation: ValidationResult;
   settings: DraftingSettings;
   onUpdateSettings: (updater: (prev: DraftingSettings) => DraftingSettings) => void;
   selectedWall: Wall | null;
+  selectedRoom?: ClosedRoom | null;
+  onChangeRoomType?: (roomId: string, newType: RoomType) => void;
   nodes: Node[];
   onDeleteWall: (wallId: string) => void;
   onOpenCalibrate: () => void;
@@ -34,10 +42,15 @@ interface RightInspectorHUDProps {
 
 export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
   currentLevel,
+  customFloorPlan,
+  onOpenUpload,
+  onStartCalibrationTool,
   liveValidation,
   settings,
   onUpdateSettings,
   selectedWall,
+  selectedRoom,
+  onChangeRoomType,
   nodes,
   onDeleteWall,
   onOpenCalibrate,
@@ -79,33 +92,80 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
 
       {/* Main HUD Panel */}
       <div className="w-80 md:w-88 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl shadow-slate-300/40 border border-slate-200/80 p-4.5 flex flex-col gap-4 max-h-[calc(100vh-100px)] overflow-y-auto">
-        {/* Client Avatar & Challenge Brief */}
-        <div className="flex items-start gap-3 pb-3 border-b border-slate-100">
-          <div className="relative shrink-0">
-            <img
-              src={client.avatar}
-              alt={client.name}
-              className="w-12 h-12 rounded-xl object-cover ring-2 ring-sky-500/20 shadow-xs"
-            />
-            <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white">
-              ✓
-            </span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-1">
-              <h3 className="font-semibold text-slate-900 text-xs truncate">
-                {client.name}
-              </h3>
-              <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded">
-                Ch. {currentLevel.levelNumber}
+        {/* Client Avatar & Challenge Brief / Custom Blueprint Card */}
+        {customFloorPlan ? (
+          <div className="flex items-start gap-3 pb-3 border-b border-slate-100">
+            <div className="relative shrink-0">
+              <img
+                src={customFloorPlan.dataUrl}
+                alt={customFloorPlan.name}
+                className="w-12 h-12 rounded-xl object-cover ring-2 ring-sky-500/30 shadow-xs border border-slate-200"
+              />
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-sky-500 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white">
+                ★
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 truncate">{client.role}</p>
-            <div className="mt-1 text-[11px] text-slate-700 italic bg-slate-50 p-2 rounded-lg border border-slate-100/80 leading-relaxed">
-              {client.quote}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <h3 className="font-semibold text-slate-900 text-xs truncate">
+                  {customFloorPlan.name}
+                </h3>
+                <span className="text-[10px] text-sky-700 font-semibold bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded">
+                  Custom
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 truncate">
+                {customFloorPlan.width} × {customFloorPlan.height} px reference
+              </p>
+              <div className="mt-2 flex items-center gap-1.5">
+                {onStartCalibrationTool && (
+                  <button
+                    onClick={onStartCalibrationTool}
+                    className="flex-1 py-1 px-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 shadow-2xs transition-colors"
+                  >
+                    <Sliders className="w-3 h-3" />
+                    <span>Calibrate 2 Points</span>
+                  </button>
+                )}
+                {onOpenUpload && (
+                  <button
+                    onClick={onOpenUpload}
+                    className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-medium transition-colors"
+                  >
+                    Change
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-start gap-3 pb-3 border-b border-slate-100">
+            <div className="relative shrink-0">
+              <img
+                src={client.avatar}
+                alt={client.name}
+                className="w-12 h-12 rounded-xl object-cover ring-2 ring-sky-500/20 shadow-xs"
+              />
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white">
+                ✓
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <h3 className="font-semibold text-slate-900 text-xs truncate">
+                  {client.name}
+                </h3>
+                <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded">
+                  Ch. {currentLevel.levelNumber}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 truncate">{client.role}</p>
+              <div className="mt-1 text-[11px] text-slate-700 italic bg-slate-50 p-2 rounded-lg border border-slate-100/80 leading-relaxed">
+                {client.quote}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Real-time Accuracy & Deviation Gauge */}
         <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-200/60">
@@ -207,6 +267,77 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             <div className="text-[10px] text-slate-500 mt-0.5">
               Press <kbd className="px-1 bg-white rounded border text-slate-700">Del</kbd> to remove segment
             </div>
+          </div>
+        )}
+
+        {/* Selected Room Inspector (When a closed room is clicked) */}
+        {selectedRoom && (
+          <div
+            className="rounded-xl p-3 border shadow-2xs space-y-2 transition-all"
+            style={{
+              backgroundColor: selectedRoom.tagBgColor,
+              borderColor: selectedRoom.borderColor,
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className="text-[11px] font-bold flex items-center gap-1.5"
+                style={{ color: selectedRoom.tagTextColor }}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: selectedRoom.borderColor }}
+                />
+                {selectedRoom.name}
+              </span>
+              <span className="text-xs font-mono font-bold text-slate-900">
+                {selectedRoom.areaMetersSq.toFixed(2)} m²
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-600">
+              <span>Perimeter: {selectedRoom.perimeterMeters.toFixed(2)} m</span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {selectedRoom.points.length} corners
+              </span>
+            </div>
+
+            {/* Quick Room Type Selector */}
+            {onChangeRoomType && (
+              <div className="pt-2 border-t border-slate-200/60">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                  Change Room Label & Theme
+                </span>
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      'living',
+                      'bedroom',
+                      'kitchen',
+                      'bathroom',
+                      'office',
+                      'dining',
+                    ] as RoomType[]
+                  ).map((t) => {
+                    const theme = ROOM_THEMES[t];
+                    const isCurrent = selectedRoom.roomType === t;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => onChangeRoomType(selectedRoom.id, t)}
+                        className={`px-1.5 py-1 rounded text-[10px] font-semibold text-center truncate border transition-colors ${
+                          isCurrent
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {theme.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

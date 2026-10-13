@@ -14,12 +14,16 @@ import {
   Layers,
   ChevronDown,
 } from 'lucide-react';
-import { BlueprintLevel } from '../types';
+import { BlueprintLevel, UploadedFloorPlan } from '../types';
+import { UploadCloud } from 'lucide-react';
 
 interface TopBarProps {
   levels: BlueprintLevel[];
   currentLevel: BlueprintLevel;
   onSelectLevel: (lvl: BlueprintLevel) => void;
+  customFloorPlan?: UploadedFloorPlan | null;
+  onClearCustomFloorPlan?: () => void;
+  onOpenUpload: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -41,6 +45,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   levels,
   currentLevel,
   onSelectLevel,
+  customFloorPlan,
+  onClearCustomFloorPlan,
+  onOpenUpload,
   canUndo,
   canRedo,
   onUndo,
@@ -136,10 +143,49 @@ export const TopBar: React.FC<TopBarProps> = ({
                     </button>
                   );
                 })}
+
+                <div className="pt-1.5 mt-1 border-t border-slate-100 px-1.5">
+                  <button
+                    onClick={() => {
+                      setLevelDropdownOpen(false);
+                      onOpenUpload();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 text-xs text-sky-700 hover:bg-sky-50 rounded-lg font-semibold flex items-center gap-2 transition-colors"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Upload Custom Plan (PNG/PDF)</span>
+                  </button>
+                </div>
               </div>
             </>
           )}
         </div>
+
+        {/* Quick Upload Plan Button */}
+        <button
+          onClick={onOpenUpload}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${
+            customFloorPlan
+              ? 'bg-sky-50 text-sky-800 border-sky-300 shadow-2xs'
+              : 'bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 border-slate-200/80 shadow-2xs'
+          }`}
+          title="Upload your own 2D floor plan image (PNG/JPG) or PDF page"
+        >
+          <UploadCloud className="w-3.5 h-3.5 text-sky-600" />
+          <span className="hidden md:inline">
+            {customFloorPlan ? 'Plan Loaded' : 'Upload Plan'}
+          </span>
+        </button>
+
+        {customFloorPlan && onClearCustomFloorPlan && (
+          <button
+            onClick={onClearCustomFloorPlan}
+            className="text-[10px] text-slate-400 hover:text-rose-600 hover:underline px-1 py-0.5"
+            title="Reset to challenge floor plan"
+          >
+            Clear Plan
+          </button>
+        )}
       </div>
 
       {/* Center Tools: Undo, Redo, Zoom Controls */}

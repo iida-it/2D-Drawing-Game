@@ -6,9 +6,11 @@ import {
   BlueprintLevel,
   DraftingSettings,
   Point,
+  UploadedFloorPlan,
+  RoomType,
 } from './types';
 import { LEVELS, DEFAULT_SCALE_FACTOR } from './data/levels';
-import { validateDraft } from './utils/geometry';
+import { validateDraft, detectClosedRooms, ROOM_THEMES } from './utils/geometry';
 import { soundEngine } from './utils/audio';
 import { exportBlueprintPng } from './utils/exportBlueprint';
 import { TopBar } from './components/TopBar';
@@ -18,6 +20,7 @@ import { RightInspectorHUD } from './components/RightInspectorHUD';
 import { SubmitModal } from './components/SubmitModal';
 import { CalibrateModal } from './components/CalibrateModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
+import { UploadModal } from './components/UploadModal';
 
 interface HistoryState {
   nodes: Node[];
@@ -26,9 +29,12 @@ interface HistoryState {
 
 export default function App() {
   const [currentLevel, setCurrentLevel] = useState<BlueprintLevel>(LEVELS[0]);
+  const [customFloorPlan, setCustomFloorPlan] = useState<UploadedFloorPlan | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [walls, setWalls] = useState<Wall[]>([]);
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [customRoomTypes, setCustomRoomTypes] = useState<Record<string, RoomType>>({});
 
   // Undo / Redo History Stack
   const [history, setHistory] = useState<HistoryState[]>([{ nodes: [], walls: [] }]);
@@ -60,8 +66,20 @@ export default function App() {
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [isCalibrateModalOpen, setIsCalibrateModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [lastMeasuredPx, setLastMeasuredPx] = useState<number | undefined>(undefined);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
+  const [toastNotification, setToastNotification] = useState<string | null>(null);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (toastNotification) {
+      const timer = setTimeout(() => {
+        setToastNotification(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastNotification]);
 
   // Sync sound engine enabled state
   useEffect(() => {
@@ -110,7 +128,6 @@ export default function App() {
   // Add Wall
   const handleAddWall = useCallback(
     (startNode: Node, endNode: Node) => {
-      // Ensure start and end nodes are in nodes array
       const nodeMap = new Map<string, Node>();
       nodes.forEach((n) => nodeMap.set(n.id, n));
 
@@ -211,6 +228,7 @@ export default function App() {
   // Select Level
   const handleSelectLevel = useCallback((lvl: BlueprintLevel) => {
     setCurrentLevel(lvl);
+    setCustomFloorPlan(null);
     setNodes([]);
     setWalls([]);
     setSelectedWallId(null);
@@ -224,6 +242,32 @@ export default function App() {
       setPan(lvl.initialViewport.pan);
       setZoom(lvl.initialViewport.zoom);
     }
+  }, []);
+
+  // Floor plan loaded via UploadModal
+  const handleFloorPlanLoaded = useCallback(
+    (plan: UploadedFloorPlan, startCalibration?: boolean) => {
+      setCustomFloorPlan(plan);
+      setPan({ x: 80, y: 50 });
+      setZoom(1.0);
+      if (startCalibration) {
+        setActiveTool('calibrate');
+        setToastNotification(
+          '📐 Calibration Tool: Click 2 points with known distance (e.g. 1.0m door) on your blueprint to calibrate canvas scale!'
+        );
+      } else {
+        setToastNotification(`Blueprint "${plan.name}" loaded successfully.`);
+      }
+    },
+    []
+  );
+
+  // Start Calibration tool directly
+  const handleStartCalibrationTool = useCallback(() => {
+    setActiveTool('calibrate');
+    setToastNotification(
+      '📐 Calibration Tool Active: Click two reference points on your plan to set known distance.'
+    );
   }, []);
 
   // Next Level Handler
@@ -255,6 +299,41 @@ export default function App() {
     }
   };
 
+  // Detected Closed Rooms & Themes
+  const detectedRooms = useMemo(() => {
+    return detectClosedRooms(nodes, walls, settings.scaleFactor, customRoomTypes);
+  }, [nodes, walls, settings.scaleFactor, customRoomTypes]);
+
+  const selectedRoom = useMemo(() => {
+    return detectedRooms.find((r) => r.id === selectedRoomId) || null;
+  }, [detectedRooms, selectedRoomId]);
+
+  const handleCycleRoomType = useCallback((roomId: string) => {
+    const types: RoomType[] = [
+      'living',
+      'bedroom',
+      'kitchen',
+      'bathroom',
+      'office',
+      'dining',
+    ];
+    setCustomRoomTypes((prev) => {
+      const current = prev[roomId] || 'living';
+      const nextIdx = (types.indexOf(current) + 1) % types.length;
+      const nextType = types[nextIdx];
+      setToastNotification(`Room updated: ${ROOM_THEMES[nextType].name}`);
+      return { ...prev, [roomId]: nextType };
+    });
+    setSelectedRoomId(roomId);
+  }, []);
+
+  const handleChangeRoomType = useCallback((roomId: string, newType: RoomType) => {
+    setCustomRoomTypes((prev) => ({ ...prev, [roomId]: newType }));
+    setToastNotification(`Room updated: ${ROOM_THEMES[newType].name}`);
+    setSelectedRoomId(roomId);
+    soundEngine.playPencilClick();
+  }, []);
+
   // Live Validation Result
   const liveValidation = useMemo(() => {
     return validateDraft(nodes, walls, currentLevel, settings.scaleFactor);
@@ -277,7 +356,9 @@ export default function App() {
       if (e.key === 'm' || e.key === 'M') setActiveTool('measure');
       if (e.key === 'c' || e.key === 'C') {
         setActiveTool('calibrate');
-        setIsCalibrateModalOpen(true);
+        setToastNotification(
+          '📐 Calibration Tool: Click 2 points on blueprint to calibrate scale, or use presets.'
+        );
       }
       if (e.key === 'e' || e.key === 'E') setActiveTool('erase');
 
@@ -314,7 +395,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleUndo, handleRedo]);
 
-  // Distance measured via Tape Measure or Calibrate tool
+  // Distance measured via Tape Measure or Calibration Tool
   const handleMeasuredDistance = (distM: number, pixelDist: number) => {
     setLastMeasuredPx(pixelDist);
     if (activeTool === 'calibrate') {
@@ -340,6 +421,9 @@ export default function App() {
         levels={LEVELS}
         currentLevel={currentLevel}
         onSelectLevel={handleSelectLevel}
+        customFloorPlan={customFloorPlan}
+        onClearCustomFloorPlan={() => setCustomFloorPlan(null)}
+        onOpenUpload={() => setIsUploadModalOpen(true)}
         canUndo={historyIndex > 0}
         canRedo={historyIndex < history.length - 1}
         onUndo={handleUndo}
@@ -359,6 +443,19 @@ export default function App() {
         hasClosedRooms={liveValidation.detectedRoomsCount > 0}
       />
 
+      {/* Toast Notification Banner */}
+      {toastNotification && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-xl shadow-xl text-xs font-medium border border-slate-700/60 animate-in fade-in slide-in-from-top-2 flex items-center gap-2">
+          <span>{toastNotification}</span>
+          <button
+            onClick={() => setToastNotification(null)}
+            className="text-slate-400 hover:text-white ml-2 text-xs"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* 2. MAIN WORKSPACE */}
       <div className="relative flex-1 w-full h-[calc(100vh-56px)] overflow-hidden">
         {/* LEFT FLOATING TOOLBAR */}
@@ -367,7 +464,7 @@ export default function App() {
           onSelectTool={(t) => {
             setActiveTool(t);
             if (t === 'calibrate') {
-              setIsCalibrateModalOpen(true);
+              handleStartCalibrationTool();
             }
           }}
           settings={settings}
@@ -377,12 +474,17 @@ export default function App() {
         {/* CENTER HTML5 DUAL-LAYER CANVAS */}
         <Canvas2D
           currentLevel={currentLevel}
+          customFloorPlan={customFloorPlan}
           nodes={nodes}
           walls={walls}
           activeTool={activeTool}
           settings={settings}
           selectedWallId={selectedWallId}
           onSelectWall={setSelectedWallId}
+          selectedRoomId={selectedRoomId}
+          onSelectRoom={setSelectedRoomId}
+          customRoomTypes={customRoomTypes}
+          onCycleRoomType={handleCycleRoomType}
           onAddWall={handleAddWall}
           onUpdateNodePosition={handleUpdateNodePosition}
           onDeleteWall={handleDeleteWall}
@@ -399,10 +501,15 @@ export default function App() {
         {/* RIGHT INSPECTOR HUD */}
         <RightInspectorHUD
           currentLevel={currentLevel}
+          customFloorPlan={customFloorPlan}
+          onOpenUpload={() => setIsUploadModalOpen(true)}
+          onStartCalibrationTool={handleStartCalibrationTool}
           liveValidation={liveValidation}
           settings={settings}
           onUpdateSettings={setSettings}
           selectedWall={walls.find((w) => w.id === selectedWallId) || null}
+          selectedRoom={selectedRoom}
+          onChangeRoomType={handleChangeRoomType}
           nodes={nodes}
           onDeleteWall={handleDeleteWall}
           onOpenCalibrate={() => setIsCalibrateModalOpen(true)}
@@ -412,6 +519,13 @@ export default function App() {
       </div>
 
       {/* 3. MODALS */}
+      {/* Upload Blueprint Reference Modal */}
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        onFloorPlanLoaded={handleFloorPlanLoaded}
+      />
+
       {/* Scoring Evaluation Modal */}
       <SubmitModal
         isOpen={isSubmitModalOpen}
@@ -431,8 +545,14 @@ export default function App() {
         settings={settings}
         onSaveScale={(newScale) => {
           setSettings((prev) => ({ ...prev, scaleFactor: newScale }));
+          soundEngine.playWallComplete();
+          setToastNotification(
+            `✅ Scale ratio updated: 1m = ${(1 / newScale).toFixed(1)}px (1px = ${(newScale * 100).toFixed(2)}cm)`
+          );
+          setActiveTool('wall');
         }}
         lastMeasuredPx={lastMeasuredPx}
+        onStartTwoPointCalibration={handleStartCalibrationTool}
       />
 
       {/* Keyboard Shortcuts Modal */}
