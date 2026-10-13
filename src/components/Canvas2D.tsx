@@ -3,6 +3,7 @@ import {
   Point,
   Node,
   Wall,
+  WallOpening,
   ToolType,
   BlueprintLevel,
   DraftingSettings,
@@ -21,6 +22,8 @@ import {
   formatMeters,
   detectClosedRooms,
   isPointInPolygon,
+  projectPointOntoSegment,
+  getWallOpeningsBreakdown,
 } from '../utils/geometry';
 import { soundEngine } from '../utils/audio';
 
@@ -29,15 +32,26 @@ interface Canvas2DProps {
   customFloorPlan?: UploadedFloorPlan | null;
   nodes: Node[];
   walls: Wall[];
+  openings?: WallOpening[];
   activeTool: ToolType;
   settings: DraftingSettings;
   selectedWallId: string | null;
   onSelectWall: (wallId: string | null) => void;
+  selectedOpeningId?: string | null;
+  onSelectOpening?: (openingId: string | null) => void;
   selectedRoomId?: string | null;
   onSelectRoom?: (roomId: string | null) => void;
   customRoomTypes?: Record<string, RoomType>;
   onCycleRoomType?: (roomId: string) => void;
   onAddWall: (startNode: Node, endNode: Node) => void;
+  onAddOpening?: (
+    wallId: string,
+    type: 'door' | 'window',
+    positionRatio: number,
+    widthMeters?: number
+  ) => void;
+  onUpdateOpening?: (openingId: string, updates: Partial<WallOpening>) => void;
+  onDeleteOpening?: (openingId: string) => void;
   onUpdateNodePosition: (nodeId: string, newPos: Point) => void;
   onDeleteWall: (wallId: string) => void;
   onDeleteNode: (nodeId: string) => void;
@@ -58,15 +72,21 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   customFloorPlan,
   nodes,
   walls,
+  openings = [],
   activeTool,
   settings,
   selectedWallId,
   onSelectWall,
+  selectedOpeningId,
+  onSelectOpening,
   selectedRoomId,
   onSelectRoom,
   customRoomTypes = {},
   onCycleRoomType,
   onAddWall,
+  onAddOpening,
+  onUpdateOpening,
+  onDeleteOpening,
   onUpdateNodePosition,
   onDeleteWall,
   onDeleteNode,
@@ -83,6 +103,16 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   const [hoveredNode, setHoveredNode] = useState<Node | null>(null);
   const [hoveredWall, setHoveredWall] = useState<Wall | null>(null);
   const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
+  const [hoveredOpening, setHoveredOpening] = useState<WallOpening | null>(null);
+  const [hoveredOpeningWall, setHoveredOpeningWall] = useState<{
+    wall: Wall;
+    t: number;
+    point: Point;
+    n1: Node;
+    n2: Node;
+    type: 'door' | 'window';
+  } | null>(null);
+
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
@@ -521,54 +551,307 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
       const isSelected = selectedWallId === w.id;
       const isHovered = hoveredWall?.id === w.id;
+      const wallOpenings = openings.filter((o) => o.wallId === w.id);
 
-      // Wall Core Segment
-      ctx.beginPath();
-      ctx.moveTo(n1.x, n1.y);
-      ctx.lineTo(n2.x, n2.y);
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      if (wallOpenings.length === 0) {
+        // Continuous wall without openings
+        ctx.beginPath();
+        ctx.moveTo(n1.x, n1.y);
+        ctx.lineTo(n2.x, n2.y);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
 
-      // Outer Wall Stroke
-      ctx.strokeStyle = isSelected
-        ? '#0284c7'
-        : isHovered
-        ? '#334155'
-        : '#1e293b';
-      ctx.lineWidth = wallThicknessPx;
-      ctx.stroke();
+        // Outer Wall Stroke
+        ctx.strokeStyle = isSelected
+          ? '#0284c7'
+          : isHovered
+          ? '#334155'
+          : '#1e293b';
+        ctx.lineWidth = wallThicknessPx;
+        ctx.stroke();
 
-      // Wall Inner Core Highlight
-      ctx.beginPath();
-      ctx.moveTo(n1.x, n1.y);
-      ctx.lineTo(n2.x, n2.y);
-      ctx.strokeStyle = isSelected
-        ? '#38bdf8'
-        : isHovered
-        ? '#475569'
-        : '#334155';
-      ctx.lineWidth = Math.max(1, wallThicknessPx * 0.45);
-      ctx.stroke();
+        // Wall Inner Core Highlight
+        ctx.beginPath();
+        ctx.moveTo(n1.x, n1.y);
+        ctx.lineTo(n2.x, n2.y);
+        ctx.strokeStyle = isSelected
+          ? '#38bdf8'
+          : isHovered
+          ? '#475569'
+          : '#334155';
+        ctx.lineWidth = Math.max(1, wallThicknessPx * 0.45);
+        ctx.stroke();
 
-      // Dynamic Dimension Badge along the wall
-      const wallDistPx = getDistance(n1, n2);
-      const wallDistMeters = pixelsToMeters(wallDistPx, settings.scaleFactor);
-      const midX = (n1.x + n2.x) / 2;
-      const midY = (n1.y + n2.y) / 2;
+        // Dynamic Dimension Badge along the wall
+        const wallDistPx = getDistance(n1, n2);
+        const wallDistMeters = pixelsToMeters(wallDistPx, settings.scaleFactor);
+        const midX = (n1.x + n2.x) / 2;
+        const midY = (n1.y + n2.y) / 2;
 
-      // Compute normal vector for dimension line offset
-      const dx = n2.x - n1.x;
-      const dy = n2.y - n1.y;
-      const len = Math.hypot(dx, dy);
-      if (len > 1e-4) {
-        const nx = -dy / len;
-        const ny = dx / len;
-        const offsetDist = 18 / zoom;
+        const dx = n2.x - n1.x;
+        const dy = n2.y - n1.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 1e-4) {
+          const nx = -dy / len;
+          const ny = dx / len;
+          const offsetDist = 18 / zoom;
 
-        const dimP1 = { x: n1.x + nx * offsetDist, y: n1.y + ny * offsetDist };
-        const dimP2 = { x: n2.x + nx * offsetDist, y: n2.y + ny * offsetDist };
+          const dimP1 = { x: n1.x + nx * offsetDist, y: n1.y + ny * offsetDist };
+          const dimP2 = { x: n2.x + nx * offsetDist, y: n2.y + ny * offsetDist };
 
-        // Dimension line
+          // Dimension line
+          ctx.strokeStyle = isSelected ? '#0284c7' : '#0ea5e9';
+          ctx.lineWidth = 1 / zoom;
+          ctx.beginPath();
+          ctx.moveTo(dimP1.x, dimP1.y);
+          ctx.lineTo(dimP2.x, dimP2.y);
+          ctx.stroke();
+
+          // Dimension tick marks at endpoints
+          const tickSize = 4 / zoom;
+          [dimP1, dimP2].forEach((p) => {
+            ctx.beginPath();
+            ctx.moveTo(p.x - ny * tickSize, p.y + nx * tickSize);
+            ctx.lineTo(p.x + ny * tickSize, p.y - nx * tickSize);
+            ctx.stroke();
+          });
+
+          // Dimension pill badge
+          const dimText = formatMeters(wallDistMeters);
+          ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+          const metrics = ctx.measureText(dimText);
+          const padX = 6 / zoom;
+          const padY = 3 / zoom;
+          const badgeW = metrics.width + padX * 2;
+          const badgeH = 16 / zoom;
+          const badgeX = midX + nx * offsetDist - badgeW / 2;
+          const badgeY = midY + ny * offsetDist - badgeH / 2;
+
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3 / zoom);
+          ctx.fill();
+          ctx.strokeStyle = isSelected ? '#0284c7' : '#bae6fd';
+          ctx.lineWidth = 1 / zoom;
+          ctx.stroke();
+
+          ctx.fillStyle = isSelected ? '#0369a1' : '#0284c7';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(dimText, midX + nx * offsetDist, midY + ny * offsetDist);
+        }
+      } else {
+        // Wall broken by openings: architectural door swings, window symbols, and chain dimensions
+        const breakdown = getWallOpeningsBreakdown(n1, n2, wallOpenings, settings.scaleFactor);
+
+        // 1. Draw solid wall segments
+        breakdown.solidSegments.forEach((seg) => {
+          ctx.beginPath();
+          ctx.moveTo(seg.startPt.x, seg.startPt.y);
+          ctx.lineTo(seg.endPt.x, seg.endPt.y);
+          ctx.lineCap = 'butt';
+          ctx.lineJoin = 'round';
+          ctx.strokeStyle = isSelected
+            ? '#0284c7'
+            : isHovered
+            ? '#334155'
+            : '#1e293b';
+          ctx.lineWidth = wallThicknessPx;
+          ctx.stroke();
+
+          // Wall inner core highlight
+          ctx.beginPath();
+          ctx.moveTo(seg.startPt.x, seg.startPt.y);
+          ctx.lineTo(seg.endPt.x, seg.endPt.y);
+          ctx.strokeStyle = isSelected
+            ? '#38bdf8'
+            : isHovered
+            ? '#475569'
+            : '#334155';
+          ctx.lineWidth = Math.max(1, wallThicknessPx * 0.45);
+          ctx.stroke();
+
+          // Capped jamb ticks at ends
+          [seg.startPt, seg.endPt].forEach((pt) => {
+            ctx.beginPath();
+            ctx.moveTo(
+              pt.x - breakdown.normal.x * (wallThicknessPx / 2),
+              pt.y - breakdown.normal.y * (wallThicknessPx / 2)
+            );
+            ctx.lineTo(
+              pt.x + breakdown.normal.x * (wallThicknessPx / 2),
+              pt.y + breakdown.normal.y * (wallThicknessPx / 2)
+            );
+            ctx.strokeStyle = isSelected ? '#0284c7' : '#1e293b';
+            ctx.lineWidth = 1.5 / zoom;
+            ctx.stroke();
+          });
+        });
+
+        // 2. Draw openings: Doors with 2D swing arcs & Windows with glass panes
+        breakdown.openings.forEach((op) => {
+          const isOpSelected = selectedOpeningId === op.opening.id;
+          const isOpHovered = hoveredOpening?.id === op.opening.id;
+          const p1 = op.startPt;
+          const p2 = op.endPt;
+          const nx = breakdown.normal.x;
+          const ny = breakdown.normal.y;
+          const flip = op.opening.swingFlip ? -1 : 1;
+
+          if (op.opening.type === 'door') {
+            // Door jamb boundary ticks
+            [p1, p2].forEach((pt) => {
+              ctx.beginPath();
+              ctx.moveTo(
+                pt.x - nx * (wallThicknessPx / 2),
+                pt.y - ny * (wallThicknessPx / 2)
+              );
+              ctx.lineTo(
+                pt.x + nx * (wallThicknessPx / 2),
+                pt.y + ny * (wallThicknessPx / 2)
+              );
+              ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
+              ctx.lineWidth = (isOpSelected ? 2.5 : 1.5) / zoom;
+              ctx.stroke();
+            });
+
+            // Door Hinge & Strike
+            const hinge = op.opening.swingDirection === 'right' ? p2 : p1;
+            const strike = op.opening.swingDirection === 'right' ? p1 : p2;
+            const leafEnd = {
+              x: hinge.x + nx * op.widthPx * flip,
+              y: hinge.y + ny * op.widthPx * flip,
+            };
+
+            // Translucent swing sweep arc
+            const radius = op.widthPx;
+            const startAngle = Math.atan2(strike.y - hinge.y, strike.x - hinge.x);
+            const endAngle = Math.atan2(leafEnd.y - hinge.y, leafEnd.x - hinge.x);
+
+            ctx.fillStyle = isOpSelected
+              ? 'rgba(2, 132, 199, 0.16)'
+              : isOpHovered
+              ? 'rgba(2, 132, 199, 0.12)'
+              : 'rgba(2, 132, 199, 0.07)';
+            ctx.beginPath();
+            ctx.moveTo(hinge.x, hinge.y);
+            ctx.arc(hinge.x, hinge.y, radius, startAngle, endAngle, flip < 0);
+            ctx.closePath();
+            ctx.fill();
+
+            // Door swing quarter-circle arc line
+            ctx.beginPath();
+            ctx.arc(hinge.x, hinge.y, radius, startAngle, endAngle, flip < 0);
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#38bdf8';
+            ctx.lineWidth = (isOpSelected ? 2.2 : 1.5) / zoom;
+            ctx.stroke();
+
+            // Door leaf thick line
+            ctx.beginPath();
+            ctx.moveTo(hinge.x, hinge.y);
+            ctx.lineTo(leafEnd.x, leafEnd.y);
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
+            ctx.lineWidth = (isOpSelected ? 3 : 2.5) / zoom;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Door pivot hinge marker
+            ctx.beginPath();
+            ctx.arc(hinge.x, hinge.y, (isOpSelected ? 4 : 3) / zoom, 0, Math.PI * 2);
+            ctx.fillStyle = isOpSelected ? '#0284c7' : '#0369a1';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1 / zoom;
+            ctx.stroke();
+
+            // Door label tag
+            const doorTag = `${op.widthMeters.toFixed(2)}m Door`;
+            ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
+            const dMetrics = ctx.measureText(doorTag);
+            const dW = dMetrics.width + 10 / zoom;
+            const dH = 15 / zoom;
+            ctx.fillStyle = isOpSelected ? '#0284c7' : '#ffffff';
+            ctx.beginPath();
+            ctx.roundRect(op.centerPt.x - dW / 2, op.centerPt.y - dH / 2, dW, dH, 3 / zoom);
+            ctx.fill();
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#bae6fd';
+            ctx.lineWidth = 1 / zoom;
+            ctx.stroke();
+            ctx.fillStyle = isOpSelected ? '#ffffff' : '#0369a1';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(doorTag, op.centerPt.x, op.centerPt.y);
+          } else {
+            // Window symbol: jamb ticks, frame, and double cyan glass pane lines
+            [p1, p2].forEach((pt) => {
+              ctx.beginPath();
+              ctx.moveTo(
+                pt.x - nx * (wallThicknessPx / 2),
+                pt.y - ny * (wallThicknessPx / 2)
+              );
+              ctx.lineTo(
+                pt.x + nx * (wallThicknessPx / 2),
+                pt.y + ny * (wallThicknessPx / 2)
+              );
+              ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
+              ctx.lineWidth = (isOpSelected ? 2.5 : 1.5) / zoom;
+              ctx.stroke();
+            });
+
+            // Outer frame/sill lines
+            const halfThick = wallThicknessPx / 2;
+            ctx.beginPath();
+            ctx.moveTo(p1.x + nx * halfThick, p1.y + ny * halfThick);
+            ctx.lineTo(p2.x + nx * halfThick, p2.y + ny * halfThick);
+            ctx.moveTo(p1.x - nx * halfThick, p1.y - ny * halfThick);
+            ctx.lineTo(p2.x - nx * halfThick, p2.y - ny * halfThick);
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#475569';
+            ctx.lineWidth = 1.5 / zoom;
+            ctx.stroke();
+
+            // Double parallel glass panes along center
+            const glassOffset = 3 / zoom;
+            ctx.beginPath();
+            ctx.moveTo(p1.x + nx * glassOffset, p1.y + ny * glassOffset);
+            ctx.lineTo(p2.x + nx * glassOffset, p2.y + ny * glassOffset);
+            ctx.moveTo(p1.x - nx * glassOffset, p1.y - ny * glassOffset);
+            ctx.lineTo(p2.x - nx * glassOffset, p2.y - ny * glassOffset);
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0ea5e9';
+            ctx.lineWidth = 1.5 / zoom;
+            ctx.stroke();
+
+            // Window label tag
+            const winTag = `${op.widthMeters.toFixed(2)}m Window`;
+            ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
+            const wMetrics = ctx.measureText(winTag);
+            const wW = wMetrics.width + 10 / zoom;
+            const wH = 15 / zoom;
+            ctx.fillStyle = isOpSelected ? '#0284c7' : '#ffffff';
+            ctx.beginPath();
+            ctx.roundRect(op.centerPt.x - wW / 2, op.centerPt.y - wH / 2, wW, wH, 3 / zoom);
+            ctx.fill();
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#bae6fd';
+            ctx.lineWidth = 1 / zoom;
+            ctx.stroke();
+            ctx.fillStyle = isOpSelected ? '#ffffff' : '#0369a1';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(winTag, op.centerPt.x, op.centerPt.y);
+          }
+        });
+
+        // 3. Chain Dimensioning: Remaining wall margins & opening widths
+        const offsetDist = 20 / zoom;
+        const dimP1 = {
+          x: n1.x + breakdown.normal.x * offsetDist,
+          y: n1.y + breakdown.normal.y * offsetDist,
+        };
+        const dimP2 = {
+          x: n2.x + breakdown.normal.x * offsetDist,
+          y: n2.y + breakdown.normal.y * offsetDist,
+        };
+
+        // Continuous dimension line
         ctx.strokeStyle = isSelected ? '#0284c7' : '#0ea5e9';
         ctx.lineWidth = 1 / zoom;
         ctx.beginPath();
@@ -576,38 +859,67 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         ctx.lineTo(dimP2.x, dimP2.y);
         ctx.stroke();
 
-        // Dimension tick marks at endpoints
+        // End tick marks
         const tickSize = 4 / zoom;
         [dimP1, dimP2].forEach((p) => {
           ctx.beginPath();
-          ctx.moveTo(p.x - ny * tickSize, p.y + nx * tickSize);
-          ctx.lineTo(p.x + ny * tickSize, p.y - nx * tickSize);
+          ctx.moveTo(
+            p.x - breakdown.unitVec.x * tickSize,
+            p.y - breakdown.unitVec.y * tickSize
+          );
+          ctx.lineTo(
+            p.x + breakdown.unitVec.x * tickSize,
+            p.y + breakdown.unitVec.y * tickSize
+          );
           ctx.stroke();
         });
 
-        // Dimension pill badge
-        const dimText = formatMeters(wallDistMeters);
-        ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
-        const metrics = ctx.measureText(dimText);
-        const padX = 6 / zoom;
-        const padY = 3 / zoom;
-        const badgeW = metrics.width + padX * 2;
-        const badgeH = 16 / zoom;
-        const badgeX = midX + nx * offsetDist - badgeW / 2;
-        const badgeY = midY + ny * offsetDist - badgeH / 2;
+        // Interior ticks and margin badges
+        breakdown.marginDimensions.forEach((m) => {
+          [m.p1, m.p2].forEach((pt) => {
+            const ptOnDim = {
+              x: pt.x + breakdown.normal.x * offsetDist,
+              y: pt.y + breakdown.normal.y * offsetDist,
+            };
+            ctx.beginPath();
+            ctx.moveTo(
+              ptOnDim.x - breakdown.unitVec.x * tickSize,
+              ptOnDim.y - breakdown.unitVec.y * tickSize
+            );
+            ctx.lineTo(
+              ptOnDim.x + breakdown.unitVec.x * tickSize,
+              ptOnDim.y + breakdown.unitVec.y * tickSize
+            );
+            ctx.strokeStyle = '#0ea5e9';
+            ctx.lineWidth = 1 / zoom;
+            ctx.stroke();
+          });
 
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3 / zoom);
-        ctx.fill();
-        ctx.strokeStyle = isSelected ? '#0284c7' : '#bae6fd';
-        ctx.lineWidth = 1 / zoom;
-        ctx.stroke();
+          // Badge along margin
+          const dimMid = {
+            x: m.midPt.x + breakdown.normal.x * offsetDist,
+            y: m.midPt.y + breakdown.normal.y * offsetDist,
+          };
+          const text = m.subLabel ? `${m.label} [${m.subLabel}]` : m.label;
+          ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
+          const metrics = ctx.measureText(text);
+          const padX = 5 / zoom;
+          const badgeW = metrics.width + padX * 2;
+          const badgeH = 15 / zoom;
 
-        ctx.fillStyle = isSelected ? '#0369a1' : '#0284c7';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(dimText, midX + nx * offsetDist, midY + ny * offsetDist);
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.roundRect(dimMid.x - badgeW / 2, dimMid.y - badgeH / 2, badgeW, badgeH, 3 / zoom);
+          ctx.fill();
+          ctx.strokeStyle = m.type === 'opening' ? '#0284c7' : '#bae6fd';
+          ctx.lineWidth = 1 / zoom;
+          ctx.stroke();
+
+          ctx.fillStyle = m.type === 'opening' ? '#0284c7' : '#0369a1';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, dimMid.x, dimMid.y);
+        });
       }
     });
 
@@ -824,8 +1136,129 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       ctx.fillText(calibText, midX, midY - 24 / zoom);
     }
 
+    // 2E.3: Live Hover Ghost Preview for Door and Window Opening Tool
+    if ((activeTool === 'door' || activeTool === 'window') && hoveredOpeningWall) {
+      const hw = hoveredOpeningWall;
+      const previewWidthM = hw.type === 'door' ? 0.9 : 1.2;
+      const previewWidthPx = metersToPixels(previewWidthM, settings.scaleFactor);
+
+      const previewOpening: WallOpening = {
+        id: 'preview-op',
+        wallId: hw.wall.id,
+        type: hw.type,
+        positionRatio: hw.t,
+        widthMeters: previewWidthM,
+        swingDirection: 'left',
+        swingFlip: false,
+      };
+
+      const ghostBreakdown = getWallOpeningsBreakdown(
+        hw.n1,
+        hw.n2,
+        [...openings.filter((o) => o.wallId === hw.wall.id), previewOpening],
+        settings.scaleFactor
+      );
+
+      // Ghost Opening Gap Outline on wall line
+      const ghostP1 = {
+        x: hw.point.x - ghostBreakdown.unitVec.x * (previewWidthPx / 2),
+        y: hw.point.y - ghostBreakdown.unitVec.y * (previewWidthPx / 2),
+      };
+      const ghostP2 = {
+        x: hw.point.x + ghostBreakdown.unitVec.x * (previewWidthPx / 2),
+        y: hw.point.y + ghostBreakdown.unitVec.y * (previewWidthPx / 2),
+      };
+
+      // Ghost Cut highlight
+      ctx.strokeStyle = '#0284c7';
+      ctx.lineWidth = wallThicknessPx;
+      ctx.setLineDash([3 / zoom, 3 / zoom]);
+      ctx.beginPath();
+      ctx.moveTo(ghostP1.x, ghostP1.y);
+      ctx.lineTo(ghostP2.x, ghostP2.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const nx = ghostBreakdown.normal.x;
+      const ny = ghostBreakdown.normal.y;
+
+      if (hw.type === 'door') {
+        // Ghost door leaf & swing arc
+        const hinge = ghostP1;
+        const strike = ghostP2;
+        const leafEnd = {
+          x: hinge.x + nx * previewWidthPx,
+          y: hinge.y + ny * previewWidthPx,
+        };
+        const radius = previewWidthPx;
+        const startAngle = Math.atan2(strike.y - hinge.y, strike.x - hinge.x);
+        const endAngle = Math.atan2(leafEnd.y - hinge.y, leafEnd.x - hinge.x);
+
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 2 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(hinge.x, hinge.y);
+        ctx.lineTo(leafEnd.x, leafEnd.y);
+        ctx.stroke();
+
+        ctx.setLineDash([4 / zoom, 3 / zoom]);
+        ctx.beginPath();
+        ctx.arc(hinge.x, hinge.y, radius, startAngle, endAngle, false);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Ghost window double glass line
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 2 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(ghostP1.x + nx * (2 / zoom), ghostP1.y + ny * (2 / zoom));
+        ctx.lineTo(ghostP2.x + nx * (2 / zoom), ghostP2.y + ny * (2 / zoom));
+        ctx.moveTo(ghostP1.x - nx * (2 / zoom), ghostP1.y - ny * (2 / zoom));
+        ctx.lineTo(ghostP2.x - nx * (2 / zoom), ghostP2.y - ny * (2 / zoom));
+        ctx.stroke();
+      }
+
+      // Live Snap Center crosshair ring
+      ctx.strokeStyle = '#0284c7';
+      ctx.lineWidth = 2 / zoom;
+      ctx.beginPath();
+      ctx.arc(hw.point.x, hw.point.y, 7 / zoom, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Ghost Breakdown Remaining Margins Pill Tags
+      const offsetDist = 26 / zoom;
+      ghostBreakdown.marginDimensions.forEach((m) => {
+        const dimMid = {
+          x: m.midPt.x + ghostBreakdown.normal.x * offsetDist,
+          y: m.midPt.y + ghostBreakdown.normal.y * offsetDist,
+        };
+        const text = m.subLabel ? `${m.label} [${m.subLabel}]` : m.label;
+        ctx.font = `700 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
+        const metrics = ctx.measureText(text);
+        const padX = 6 / zoom;
+        const badgeW = metrics.width + padX * 2;
+        const badgeH = 16 / zoom;
+
+        ctx.fillStyle = m.type === 'opening' ? '#0284c7' : '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(dimMid.x - badgeW / 2, dimMid.y - badgeH / 2, badgeW, badgeH, 3 / zoom);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, dimMid.x, dimMid.y);
+      });
+    }
+
     // 2F: Cursor Snapping Crosshairs
-    if (activeTool === 'wall' || activeTool === 'measure' || activeTool === 'calibrate') {
+    if (
+      activeTool === 'wall' ||
+      activeTool === 'measure' ||
+      activeTool === 'calibrate' ||
+      activeTool === 'door' ||
+      activeTool === 'window'
+    ) {
       const processed = getProcessedPoint(cursorWorldPos, activeDrawingNode);
       if (processed.snappedNode) {
         ctx.strokeStyle = '#10b981';
@@ -858,11 +1291,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     currentLevel,
     nodes,
     walls,
+    openings,
     activeTool,
     settings,
     selectedWallId,
+    selectedOpeningId,
     hoveredWall,
     hoveredNode,
+    hoveredOpening,
+    hoveredOpeningWall,
     activeDrawingNode,
     cursorWorldPos,
     measureStartPoint,
@@ -986,10 +1423,87 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
     setHoveredNode(foundNode);
 
+    const nodeMap = new Map<string, Node>();
+    nodes.forEach((n) => nodeMap.set(n.id, n));
+
+    // Hover detection for existing openings
+    let foundOpening: WallOpening | null = null;
+    for (const op of openings) {
+      const parentWall = walls.find((w) => w.id === op.wallId);
+      if (parentWall) {
+        const n1 = nodeMap.get(parentWall.startNodeId);
+        const n2 = nodeMap.get(parentWall.endNodeId);
+        if (n1 && n2) {
+          const opCenter = {
+            x: n1.x + op.positionRatio * (n2.x - n1.x),
+            y: n1.y + op.positionRatio * (n2.y - n1.y),
+          };
+          if (getDistance(world, opCenter) < 16 / zoom) {
+            foundOpening = op;
+            break;
+          }
+        }
+      }
+    }
+    setHoveredOpening(foundOpening);
+
+    // Door or Window Tool: Snap opening onto hovered wall
+    if (activeTool === 'door' || activeTool === 'window') {
+      let bestWall: Wall | null = null;
+      let bestDist = 24 / zoom;
+      let bestT = 0.5;
+      let bestPt = world;
+      let bestN1: Node | null = null;
+      let bestN2: Node | null = null;
+
+      for (const w of walls) {
+        const n1 = nodeMap.get(w.startNodeId);
+        const n2 = nodeMap.get(w.endNodeId);
+        if (n1 && n2) {
+          const proj = projectPointOntoSegment(world, n1, n2);
+          if (proj.distance < bestDist) {
+            bestDist = proj.distance;
+            bestWall = w;
+            bestN1 = n1;
+            bestN2 = n2;
+
+            const wallLenPx = getDistance(n1, n2);
+            const openWidthM = activeTool === 'door' ? 0.9 : 1.2;
+            const openWidthPx = metersToPixels(openWidthM, settings.scaleFactor);
+            const halfRatio = (openWidthPx / 2) / wallLenPx;
+
+            const minT = Math.min(0.5, halfRatio + 0.02);
+            const maxT = Math.max(0.5, 1.0 - halfRatio - 0.02);
+            bestT = Math.max(minT, Math.min(maxT, proj.ratio));
+            bestPt = {
+              x: n1.x + bestT * (n2.x - n1.x),
+              y: n1.y + bestT * (n2.y - n1.y),
+            };
+          }
+        }
+      }
+
+      if (bestWall && bestN1 && bestN2) {
+        setHoveredOpeningWall({
+          wall: bestWall,
+          t: bestT,
+          point: bestPt,
+          n1: bestN1,
+          n2: bestN2,
+          type: activeTool,
+        });
+        setHoveredWall(bestWall);
+      } else {
+        setHoveredOpeningWall(null);
+        setHoveredWall(null);
+      }
+      return;
+    } else {
+      setHoveredOpeningWall(null);
+    }
+
     // Hover detection for walls and closed room polygons
-    if (!foundNode) {
-      const nodeMap = new Map<string, Node>();
-      nodes.forEach((n) => nodeMap.set(n.id, n));
+    if (!foundNode && !foundOpening) {
       let foundWall: Wall | null = null;
 
       for (const w of walls) {
@@ -1039,22 +1553,43 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     const world = screenToWorld(mouseScreenX, mouseScreenY);
 
+    // DOOR OR WINDOW TOOL
+    if (activeTool === 'door' || activeTool === 'window') {
+      if (hoveredOpeningWall && onAddOpening) {
+        onAddOpening(
+          hoveredOpeningWall.wall.id,
+          hoveredOpeningWall.type,
+          hoveredOpeningWall.t
+        );
+      }
+      return;
+    }
+
     // 1. SELECT TOOL
     if (activeTool === 'select') {
-      if (hoveredNode) {
+      if (hoveredOpening) {
+        if (onSelectOpening) onSelectOpening(hoveredOpening.id);
+        onSelectWall(null);
+        if (onSelectRoom) onSelectRoom(null);
+        soundEngine.playPencilClick();
+      } else if (hoveredNode) {
         setDraggingNodeId(hoveredNode.id);
+        if (onSelectOpening) onSelectOpening(null);
         soundEngine.playPencilClick();
       } else if (hoveredWall) {
         onSelectWall(hoveredWall.id);
+        if (onSelectOpening) onSelectOpening(null);
         if (onSelectRoom) onSelectRoom(null);
         soundEngine.playPencilClick();
       } else if (hoveredRoomId) {
         if (onSelectRoom) onSelectRoom(hoveredRoomId);
         if (onCycleRoomType) onCycleRoomType(hoveredRoomId);
         onSelectWall(null);
+        if (onSelectOpening) onSelectOpening(null);
         soundEngine.playWallComplete();
       } else {
         onSelectWall(null);
+        if (onSelectOpening) onSelectOpening(null);
         if (onSelectRoom) onSelectRoom(null);
       }
       return;
@@ -1158,7 +1693,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     // 5. ERASE TOOL
     if (activeTool === 'erase') {
-      if (hoveredWall) {
+      if (hoveredOpening && onDeleteOpening) {
+        onDeleteOpening(hoveredOpening.id);
+        soundEngine.playDeleteSound();
+      } else if (hoveredWall) {
         onDeleteWall(hoveredWall.id);
         soundEngine.playDeleteSound();
       } else if (hoveredNode) {
@@ -1211,10 +1749,13 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (activeTool === 'wall' || activeTool === 'measure' || activeTool === 'calibrate') {
       return 'cursor-crosshair';
     }
+    if (activeTool === 'door' || activeTool === 'window') {
+      return hoveredOpeningWall ? 'cursor-pointer' : 'cursor-crosshair';
+    }
     if (activeTool === 'erase') {
       return 'cursor-no-drop';
     }
-    if (hoveredNode || hoveredWall || hoveredRoomId) {
+    if (hoveredOpening || hoveredNode || hoveredWall || hoveredRoomId) {
       return 'cursor-pointer';
     }
     return 'cursor-default';
@@ -1268,12 +1809,20 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
               ? activeDrawingNode
                 ? 'Click to place next corner · Esc to finish'
                 : 'Click to start drafting wall'
+              : activeTool === 'door'
+              ? hoveredOpeningWall
+                ? 'Click wall to place door opening · F to flip swing'
+                : 'Hover over any wall segment to snap door opening'
+              : activeTool === 'window'
+              ? hoveredOpeningWall
+                ? 'Click wall to place window opening'
+                : 'Hover over any wall segment to snap window opening'
               : activeTool === 'measure'
               ? 'Click two points to measure distance'
               : activeTool === 'select'
-              ? 'Click to select or drag node to adjust'
+              ? 'Click to select element or drag corner node'
               : activeTool === 'erase'
-              ? 'Click segment or node to delete'
+              ? 'Click wall, opening, or node to delete'
               : 'Pan canvas'}
           </div>
         </div>

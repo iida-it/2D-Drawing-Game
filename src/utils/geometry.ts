@@ -1,4 +1,4 @@
-import { Point, Node, Wall, ClosedRoom, RoomType, BlueprintLevel, ValidationResult } from '../types';
+import { Point, Node, Wall, WallOpening, ClosedRoom, RoomType, BlueprintLevel, ValidationResult } from '../types';
 
 /** Distance between two points in coordinate units */
 export function getDistance(p1: Point, p2: Point): number {
@@ -594,3 +594,254 @@ export function validateDraft(
     checklist,
   };
 }
+
+/**
+ * Project a point onto a line segment and return the projection point, ratio t, and distance
+ */
+export function projectPointOntoSegment(
+  p: Point,
+  a: Point,
+  b: Point
+): { projected: Point; ratio: number; distance: number } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+
+  if (l2 === 0) {
+    return {
+      projected: { x: a.x, y: a.y },
+      ratio: 0,
+      distance: getDistance(p, a),
+    };
+  }
+
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+
+  const proj = {
+    x: a.x + t * dx,
+    y: a.y + t * dy,
+  };
+
+  return {
+    projected: proj,
+    ratio: t,
+    distance: getDistance(p, proj),
+  };
+}
+
+export interface WallOpeningInterval {
+  opening: WallOpening;
+  tStart: number;
+  tEnd: number;
+  startPt: Point;
+  endPt: Point;
+  centerPt: Point;
+  widthMeters: number;
+  widthPx: number;
+}
+
+export interface WallSolidSegment {
+  startPt: Point;
+  endPt: Point;
+  lengthMeters: number;
+  lengthPx: number;
+  tStart: number;
+  tEnd: number;
+}
+
+export interface WallMarginDimension {
+  type: 'margin' | 'opening';
+  label: string;
+  subLabel?: string;
+  p1: Point;
+  p2: Point;
+  midPt: Point;
+  lengthMeters: number;
+  opening?: WallOpening;
+}
+
+export interface WallBreakdownResult {
+  wallLengthPx: number;
+  wallLengthMeters: number;
+  normal: Point;
+  unitVec: Point;
+  openings: WallOpeningInterval[];
+  solidSegments: WallSolidSegment[];
+  marginDimensions: WallMarginDimension[];
+}
+
+/**
+ * Computes architectural wall breaks, openings, and margin dimension segments along a wall
+ */
+export function getWallOpeningsBreakdown(
+  n1: Point,
+  n2: Point,
+  wallOpenings: WallOpening[],
+  scaleFactor: number
+): WallBreakdownResult {
+  const dx = n2.x - n1.x;
+  const dy = n2.y - n1.y;
+  const wallLengthPx = Math.hypot(dx, dy);
+  const wallLengthMeters = pixelsToMeters(wallLengthPx, scaleFactor);
+
+  if (wallLengthPx < 1e-4) {
+    return {
+      wallLengthPx: 0,
+      wallLengthMeters: 0,
+      normal: { x: 0, y: -1 },
+      unitVec: { x: 1, y: 0 },
+      openings: [],
+      solidSegments: [],
+      marginDimensions: [],
+    };
+  }
+
+  const ux = dx / wallLengthPx;
+  const uy = dy / wallLengthPx;
+  const nx = -uy;
+  const ny = ux;
+
+  // Compute opening intervals along the wall
+  const validOpenings: WallOpeningInterval[] = [];
+  for (const op of wallOpenings) {
+    const widthM = op.widthMeters || (op.type === 'door' ? 0.9 : 1.2);
+    const widthPx = metersToPixels(widthM, scaleFactor);
+    const halfRatio = (widthPx / 2) / wallLengthPx;
+
+    // Clamp center position so opening stays reasonably on the wall line
+    const minCenter = Math.min(0.5, halfRatio + 0.02);
+    const maxCenter = Math.max(0.5, 1.0 - halfRatio - 0.02);
+    const centerT = Math.max(minCenter, Math.min(maxCenter, op.positionRatio));
+
+    const tStart = Math.max(0, centerT - halfRatio);
+    const tEnd = Math.min(1, centerT + halfRatio);
+
+    const startPt = { x: n1.x + tStart * dx, y: n1.y + tStart * dy };
+    const endPt = { x: n1.x + tEnd * dx, y: n1.y + tEnd * dy };
+    const centerPt = { x: n1.x + centerT * dx, y: n1.y + centerT * dy };
+
+    validOpenings.push({
+      opening: op,
+      tStart,
+      tEnd,
+      startPt,
+      endPt,
+      centerPt,
+      widthMeters: widthM,
+      widthPx,
+    });
+  }
+
+  // Sort openings along wall by start ratio
+  validOpenings.sort((a, b) => a.tStart - b.tStart);
+
+  // Build solid unbroken wall segments
+  const solidSegments: WallSolidSegment[] = [];
+  let currentT = 0;
+
+  for (const op of validOpenings) {
+    if (op.tStart > currentT + 0.005) {
+      const segStart = { x: n1.x + currentT * dx, y: n1.y + currentT * dy };
+      const segEnd = { x: n1.x + op.tStart * dx, y: n1.y + op.tStart * dy };
+      const segLengthPx = (op.tStart - currentT) * wallLengthPx;
+      const segLengthM = pixelsToMeters(segLengthPx, scaleFactor);
+
+      solidSegments.push({
+        startPt: segStart,
+        endPt: segEnd,
+        lengthMeters: segLengthM,
+        lengthPx: segLengthPx,
+        tStart: currentT,
+        tEnd: op.tStart,
+      });
+    }
+    currentT = Math.max(currentT, op.tEnd);
+  }
+
+  if (currentT < 0.995) {
+    const segStart = { x: n1.x + currentT * dx, y: n1.y + currentT * dy };
+    const segEnd = { x: n2.x, y: n2.y };
+    const segLengthPx = (1 - currentT) * wallLengthPx;
+    const segLengthM = pixelsToMeters(segLengthPx, scaleFactor);
+
+    solidSegments.push({
+      startPt: segStart,
+      endPt: segEnd,
+      lengthMeters: segLengthM,
+      lengthPx: segLengthPx,
+      tStart: currentT,
+      tEnd: 1,
+    });
+  }
+
+  // Build Chain Dimension breakdown for margins and openings
+  const marginDimensions: WallMarginDimension[] = [];
+  let chainT = 0;
+
+  for (const op of validOpenings) {
+    // Margin before opening
+    if (op.tStart > chainT) {
+      const p1 = { x: n1.x + chainT * dx, y: n1.y + chainT * dy };
+      const p2 = { x: n1.x + op.tStart * dx, y: n1.y + op.tStart * dy };
+      const distM = pixelsToMeters((op.tStart - chainT) * wallLengthPx, scaleFactor);
+      const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+      marginDimensions.push({
+        type: 'margin',
+        label: formatMeters(distM),
+        p1,
+        p2,
+        midPt: mid,
+        lengthMeters: distM,
+      });
+    }
+
+    // The opening itself
+    const pOpen1 = { x: n1.x + op.tStart * dx, y: n1.y + op.tStart * dy };
+    const pOpen2 = { x: n1.x + op.tEnd * dx, y: n1.y + op.tEnd * dy };
+    const openDistM = pixelsToMeters((op.tEnd - op.tStart) * wallLengthPx, scaleFactor);
+    const openMid = { x: (pOpen1.x + pOpen2.x) / 2, y: (pOpen1.y + pOpen2.y) / 2 };
+
+    marginDimensions.push({
+      type: 'opening',
+      label: formatMeters(openDistM),
+      subLabel: op.opening.type === 'door' ? 'Door' : 'Window',
+      p1: pOpen1,
+      p2: pOpen2,
+      midPt: openMid,
+      lengthMeters: openDistM,
+      opening: op.opening,
+    });
+
+    chainT = op.tEnd;
+  }
+
+  // Final margin after last opening
+  if (chainT < 1) {
+    const p1 = { x: n1.x + chainT * dx, y: n1.y + chainT * dy };
+    const p2 = { x: n2.x, y: n2.y };
+    const distM = pixelsToMeters((1 - chainT) * wallLengthPx, scaleFactor);
+    const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+    marginDimensions.push({
+      type: 'margin',
+      label: formatMeters(distM),
+      p1,
+      p2,
+      midPt: mid,
+      lengthMeters: distM,
+    });
+  }
+
+  return {
+    wallLengthPx,
+    wallLengthMeters,
+    normal: { x: nx, y: ny },
+    unitVec: { x: ux, y: uy },
+    openings: validOpenings,
+    solidSegments,
+    marginDimensions,
+  };
+}
+

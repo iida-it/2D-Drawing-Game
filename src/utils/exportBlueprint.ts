@@ -1,9 +1,10 @@
-import { Node, Wall, BlueprintLevel, DraftingSettings } from '../types';
+import { Node, Wall, WallOpening, BlueprintLevel, DraftingSettings } from '../types';
 import {
   getDistance,
   pixelsToMeters,
   formatMeters,
   detectClosedRooms,
+  getWallOpeningsBreakdown,
 } from './geometry';
 
 export function exportBlueprintPng(
@@ -11,7 +12,8 @@ export function exportBlueprintPng(
   walls: Wall[],
   level: BlueprintLevel,
   settings: DraftingSettings,
-  accuracyPercent: number
+  accuracyPercent: number,
+  openings: WallOpening[] = []
 ) {
   const exportCanvas = document.createElement('canvas');
   const width = 1600;
@@ -130,34 +132,127 @@ export function exportBlueprintPng(
     const n2 = nodeMap.get(w.endNodeId);
     if (!n1 || !n2) return;
 
-    // Wall thick stroke
-    ctx.beginPath();
-    ctx.moveTo(n1.x, n1.y);
-    ctx.lineTo(n2.x, n2.y);
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 8;
-    ctx.lineCap = 'square';
-    ctx.stroke();
+    const wallOpenings = openings.filter((o) => o.wallId === w.id);
 
-    // Measurement line & text
-    const distPx = getDistance(n1, n2);
-    const distM = pixelsToMeters(distPx, settings.scaleFactor);
-    const midX = (n1.x + n2.x) / 2;
-    const midY = (n1.y + n2.y) / 2;
+    if (wallOpenings.length === 0) {
+      // Standard continuous wall
+      ctx.beginPath();
+      ctx.moveTo(n1.x, n1.y);
+      ctx.lineTo(n2.x, n2.y);
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 8;
+      ctx.lineCap = 'square';
+      ctx.stroke();
 
-    const dx = n2.x - n1.x;
-    const dy = n2.y - n1.y;
-    const len = Math.hypot(dx, dy);
-    if (len > 1e-4) {
-      const nx = -dy / len;
-      const ny = dx / len;
-      const offset = 18;
+      const distPx = getDistance(n1, n2);
+      const distM = pixelsToMeters(distPx, settings.scaleFactor);
+      const midX = (n1.x + n2.x) / 2;
+      const midY = (n1.y + n2.y) / 2;
+      const dx = n2.x - n1.x;
+      const dy = n2.y - n1.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 1e-4) {
+        const nx = -dy / len;
+        const ny = dx / len;
+        const offset = 18;
+        ctx.fillStyle = '#0284c7';
+        ctx.font = '600 11px "Fira Code", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(formatMeters(distM), midX + nx * offset, midY + ny * offset);
+      }
+    } else {
+      // Wall with openings: render broken segments & architectural symbols
+      const breakdown = getWallOpeningsBreakdown(n1, n2, wallOpenings, settings.scaleFactor);
 
-      ctx.fillStyle = '#0284c7';
-      ctx.font = '600 11px "Fira Code", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(formatMeters(distM), midX + nx * offset, midY + ny * offset);
+      // 1. Solid wall segments
+      breakdown.solidSegments.forEach((seg) => {
+        ctx.beginPath();
+        ctx.moveTo(seg.startPt.x, seg.startPt.y);
+        ctx.lineTo(seg.endPt.x, seg.endPt.y);
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'square';
+        ctx.stroke();
+      });
+
+      // 2. Openings symbols
+      breakdown.openings.forEach((op) => {
+        const p1 = op.startPt;
+        const p2 = op.endPt;
+        const nx = breakdown.normal.x;
+        const ny = breakdown.normal.y;
+        const flip = op.opening.swingFlip ? -1 : 1;
+
+        if (op.opening.type === 'door') {
+          // Door jamb ticks
+          ctx.beginPath();
+          ctx.moveTo(p1.x - nx * 4, p1.y - ny * 4);
+          ctx.lineTo(p1.x + nx * 4, p1.y + ny * 4);
+          ctx.moveTo(p2.x - nx * 4, p2.y - ny * 4);
+          ctx.lineTo(p2.x + nx * 4, p2.y + ny * 4);
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Door leaf line
+          const hinge = op.opening.swingDirection === 'right' ? p2 : p1;
+          const leafEnd = {
+            x: hinge.x + nx * op.widthPx * flip,
+            y: hinge.y + ny * op.widthPx * flip,
+          };
+          ctx.beginPath();
+          ctx.moveTo(hinge.x, hinge.y);
+          ctx.lineTo(leafEnd.x, leafEnd.y);
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+
+          // Swing arc
+          const strike = op.opening.swingDirection === 'right' ? p1 : p2;
+          const radius = op.widthPx;
+          const startAngle = Math.atan2(strike.y - hinge.y, strike.x - hinge.x);
+          const endAngle = Math.atan2(leafEnd.y - hinge.y, leafEnd.x - hinge.x);
+          ctx.beginPath();
+          ctx.arc(hinge.x, hinge.y, radius, startAngle, endAngle, flip < 0);
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          // Window symbol
+          ctx.beginPath();
+          ctx.moveTo(p1.x - nx * 4, p1.y - ny * 4);
+          ctx.lineTo(p1.x + nx * 4, p1.y + ny * 4);
+          ctx.moveTo(p2.x - nx * 4, p2.y - ny * 4);
+          ctx.lineTo(p2.x + nx * 4, p2.y + ny * 4);
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Glass double line
+          ctx.beginPath();
+          ctx.moveTo(p1.x - nx * 1.5, p1.y - ny * 1.5);
+          ctx.lineTo(p2.x - nx * 1.5, p2.y - ny * 1.5);
+          ctx.moveTo(p1.x + nx * 1.5, p1.y + ny * 1.5);
+          ctx.lineTo(p2.x + nx * 1.5, p2.y + ny * 1.5);
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      });
+
+      // 3. Margin dimensions
+      breakdown.marginDimensions.forEach((m) => {
+        const offset = 20;
+        const nx = breakdown.normal.x;
+        const ny = breakdown.normal.y;
+        ctx.fillStyle = m.type === 'opening' ? '#0284c7' : '#475569';
+        ctx.font = '600 10px "Fira Code", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const label = m.subLabel ? `${m.label} [${m.subLabel}]` : m.label;
+        ctx.fillText(label, m.midPt.x + nx * offset, m.midPt.y + ny * offset);
+      });
     }
   });
 

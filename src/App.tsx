@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Node,
   Wall,
+  WallOpening,
   ToolType,
   BlueprintLevel,
   DraftingSettings,
@@ -25,6 +26,7 @@ import { UploadModal } from './components/UploadModal';
 interface HistoryState {
   nodes: Node[];
   walls: Wall[];
+  openings: WallOpening[];
 }
 
 export default function App() {
@@ -32,12 +34,14 @@ export default function App() {
   const [customFloorPlan, setCustomFloorPlan] = useState<UploadedFloorPlan | null>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [walls, setWalls] = useState<Wall[]>([]);
+  const [openings, setOpenings] = useState<WallOpening[]>([]);
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null);
+  const [selectedOpeningId, setSelectedOpeningId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [customRoomTypes, setCustomRoomTypes] = useState<Record<string, RoomType>>({});
 
   // Undo / Redo History Stack
-  const [history, setHistory] = useState<HistoryState[]>([{ nodes: [], walls: [] }]);
+  const [history, setHistory] = useState<HistoryState[]>([{ nodes: [], walls: [], openings: [] }]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
 
   // Active Drafting Tool
@@ -88,9 +92,9 @@ export default function App() {
 
   // Push new state to history
   const pushHistory = useCallback(
-    (newNodes: Node[], newWalls: Wall[]) => {
+    (newNodes: Node[], newWalls: Wall[], newOpenings: WallOpening[] = openings) => {
       const nextHistory = history.slice(0, historyIndex + 1);
-      nextHistory.push({ nodes: newNodes, walls: newWalls });
+      nextHistory.push({ nodes: newNodes, walls: newWalls, openings: newOpenings });
       // Limit history to 40 steps
       if (nextHistory.length > 40) {
         nextHistory.shift();
@@ -98,7 +102,7 @@ export default function App() {
       setHistory(nextHistory);
       setHistoryIndex(nextHistory.length - 1);
     },
-    [history, historyIndex]
+    [history, historyIndex, openings]
   );
 
   // Undo Handler
@@ -108,7 +112,9 @@ export default function App() {
       setHistoryIndex(newIdx);
       setNodes(history[newIdx].nodes);
       setWalls(history[newIdx].walls);
+      setOpenings(history[newIdx].openings || []);
       setSelectedWallId(null);
+      setSelectedOpeningId(null);
       soundEngine.playPencilClick();
     }
   }, [historyIndex, history]);
@@ -120,7 +126,9 @@ export default function App() {
       setHistoryIndex(newIdx);
       setNodes(history[newIdx].nodes);
       setWalls(history[newIdx].walls);
+      setOpenings(history[newIdx].openings || []);
       setSelectedWallId(null);
+      setSelectedOpeningId(null);
       soundEngine.playPencilClick();
     }
   }, [historyIndex, history]);
@@ -160,9 +168,66 @@ export default function App() {
       const newWalls = [...walls, newWall];
       setNodes(newNodes);
       setWalls(newWalls);
-      pushHistory(newNodes, newWalls);
+      pushHistory(newNodes, newWalls, openings);
     },
-    [nodes, walls, settings.wallThicknessMeters, pushHistory]
+    [nodes, walls, openings, settings.wallThicknessMeters, pushHistory]
+  );
+
+  // Add Opening (Door or Window)
+  const handleAddOpening = useCallback(
+    (
+      wallId: string,
+      type: 'door' | 'window',
+      positionRatio: number,
+      widthMeters?: number
+    ) => {
+      const defaultWidth = type === 'door' ? 0.9 : 1.2;
+      const newOpening: WallOpening = {
+        id: `op-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        wallId,
+        type,
+        positionRatio,
+        widthMeters: widthMeters || defaultWidth,
+        swingDirection: 'left',
+        swingFlip: false,
+      };
+
+      const newOpenings = [...openings, newOpening];
+      setOpenings(newOpenings);
+      setSelectedOpeningId(newOpening.id);
+      pushHistory(nodes, walls, newOpenings);
+      soundEngine.playPencilClick();
+      setToastNotification(
+        type === 'door'
+          ? `🚪 Door opening (${(widthMeters || defaultWidth).toFixed(2)}m) placed on wall.`
+          : `🪟 Window opening (${(widthMeters || defaultWidth).toFixed(2)}m) placed on wall.`
+      );
+    },
+    [openings, nodes, walls, pushHistory]
+  );
+
+  // Update Opening
+  const handleUpdateOpening = useCallback(
+    (openingId: string, updates: Partial<WallOpening>) => {
+      const newOpenings = openings.map((o) =>
+        o.id === openingId ? { ...o, ...updates } : o
+      );
+      setOpenings(newOpenings);
+      pushHistory(nodes, walls, newOpenings);
+    },
+    [openings, nodes, walls, pushHistory]
+  );
+
+  // Delete Opening
+  const handleDeleteOpening = useCallback(
+    (openingId: string) => {
+      const newOpenings = openings.filter((o) => o.id !== openingId);
+      setOpenings(newOpenings);
+      if (selectedOpeningId === openingId) setSelectedOpeningId(null);
+      pushHistory(nodes, walls, newOpenings);
+      soundEngine.playDeleteSound();
+    },
+    [openings, selectedOpeningId, nodes, walls, pushHistory]
   );
 
   // Update Node Position (when dragged in select mode)
@@ -172,9 +237,9 @@ export default function App() {
         n.id === nodeId ? { ...n, x: newPos.x, y: newPos.y } : n
       );
       setNodes(updatedNodes);
-      pushHistory(updatedNodes, walls);
+      pushHistory(updatedNodes, walls, openings);
     },
-    [nodes, walls, pushHistory]
+    [nodes, walls, openings, pushHistory]
   );
 
   // Delete Wall
@@ -188,42 +253,59 @@ export default function App() {
         usedNodeIds.add(w.endNodeId);
       });
       const newNodes = nodes.filter((n) => usedNodeIds.has(n.id));
+      const newOpenings = openings.filter((o) => o.wallId !== wallId);
 
       setWalls(newWalls);
       setNodes(newNodes);
+      setOpenings(newOpenings);
       setSelectedWallId(null);
-      pushHistory(newNodes, newWalls);
+      if (selectedOpeningId && openings.some((o) => o.id === selectedOpeningId && o.wallId === wallId)) {
+        setSelectedOpeningId(null);
+      }
+      pushHistory(newNodes, newWalls, newOpenings);
       soundEngine.playDeleteSound();
     },
-    [walls, nodes, pushHistory]
+    [walls, nodes, openings, selectedOpeningId, pushHistory]
   );
 
   // Delete Node
   const handleDeleteNode = useCallback(
     (nodeId: string) => {
+      const deletedWallIds = new Set(
+        walls
+          .filter((w) => w.startNodeId === nodeId || w.endNodeId === nodeId)
+          .map((w) => w.id)
+      );
       const newWalls = walls.filter(
         (w) => w.startNodeId !== nodeId && w.endNodeId !== nodeId
       );
       const newNodes = nodes.filter((n) => n.id !== nodeId);
+      const newOpenings = openings.filter((o) => !deletedWallIds.has(o.wallId));
 
       setWalls(newWalls);
       setNodes(newNodes);
+      setOpenings(newOpenings);
       setSelectedWallId(null);
-      pushHistory(newNodes, newWalls);
+      if (selectedOpeningId && openings.some((o) => o.id === selectedOpeningId && deletedWallIds.has(o.wallId))) {
+        setSelectedOpeningId(null);
+      }
+      pushHistory(newNodes, newWalls, newOpenings);
       soundEngine.playDeleteSound();
     },
-    [walls, nodes, pushHistory]
+    [walls, nodes, openings, selectedOpeningId, pushHistory]
   );
 
   // Clear Canvas
   const handleClear = useCallback(() => {
-    if (walls.length === 0 && nodes.length === 0) return;
+    if (walls.length === 0 && nodes.length === 0 && openings.length === 0) return;
     setNodes([]);
     setWalls([]);
+    setOpenings([]);
     setSelectedWallId(null);
-    pushHistory([], []);
+    setSelectedOpeningId(null);
+    pushHistory([], [], []);
     soundEngine.playDeleteSound();
-  }, [walls.length, nodes.length, pushHistory]);
+  }, [walls.length, nodes.length, openings.length, pushHistory]);
 
   // Select Level
   const handleSelectLevel = useCallback((lvl: BlueprintLevel) => {
@@ -231,8 +313,10 @@ export default function App() {
     setCustomFloorPlan(null);
     setNodes([]);
     setWalls([]);
+    setOpenings([]);
     setSelectedWallId(null);
-    setHistory([{ nodes: [], walls: [] }]);
+    setSelectedOpeningId(null);
+    setHistory([{ nodes: [], walls: [], openings: [] }]);
     setHistoryIndex(0);
     setSettings((prev) => ({
       ...prev,
@@ -353,6 +437,14 @@ export default function App() {
       // Hotkeys
       if (e.key === 'v' || e.key === 'V') setActiveTool('select');
       if (e.key === 'w' || e.key === 'W') setActiveTool('wall');
+      if (e.key === 'd' || e.key === 'D') {
+        setActiveTool('door');
+        setToastNotification('🚪 Door Opening Tool: Hover over any wall to snap a door opening.');
+      }
+      if (e.key === 'n' || e.key === 'N') {
+        setActiveTool('window');
+        setToastNotification('🪟 Window Opening Tool: Hover over any wall to snap a window opening.');
+      }
       if (e.key === 'm' || e.key === 'M') setActiveTool('measure');
       if (e.key === 'c' || e.key === 'C') {
         setActiveTool('calibrate');
@@ -361,6 +453,24 @@ export default function App() {
         );
       }
       if (e.key === 'e' || e.key === 'E') setActiveTool('erase');
+
+      // Flip Door Swing hotkey (F)
+      if (e.key === 'f' || e.key === 'F') {
+        if (selectedOpeningId) {
+          const targetOp = openings.find((o) => o.id === selectedOpeningId);
+          if (targetOp && targetOp.type === 'door') {
+            handleUpdateOpening(selectedOpeningId, { swingFlip: !targetOp.swingFlip });
+            setToastNotification('Door swing flipped.');
+          }
+        }
+      }
+
+      // Delete key deletes selected opening if any
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedOpeningId) {
+          handleDeleteOpening(selectedOpeningId);
+        }
+      }
 
       // Toggles
       if (e.key === 's' || e.key === 'S') {
@@ -393,7 +503,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, selectedOpeningId, openings, handleUpdateOpening, handleDeleteOpening]);
 
   // Distance measured via Tape Measure or Calibration Tool
   const handleMeasuredDistance = (distM: number, pixelDist: number) => {
@@ -410,7 +520,8 @@ export default function App() {
       walls,
       currentLevel,
       settings,
-      liveValidation.scorePercent
+      liveValidation.scorePercent,
+      openings
     );
   };
 
@@ -465,6 +576,10 @@ export default function App() {
             setActiveTool(t);
             if (t === 'calibrate') {
               handleStartCalibrationTool();
+            } else if (t === 'door') {
+              setToastNotification('🚪 Door Opening Tool: Hover over any wall to snap a door opening.');
+            } else if (t === 'window') {
+              setToastNotification('🪟 Window Opening Tool: Hover over any wall to snap a window opening.');
             }
           }}
           settings={settings}
@@ -477,15 +592,33 @@ export default function App() {
           customFloorPlan={customFloorPlan}
           nodes={nodes}
           walls={walls}
+          openings={openings}
           activeTool={activeTool}
           settings={settings}
           selectedWallId={selectedWallId}
-          onSelectWall={setSelectedWallId}
+          onSelectWall={(wid) => {
+            setSelectedWallId(wid);
+            if (wid) setSelectedOpeningId(null);
+          }}
+          selectedOpeningId={selectedOpeningId}
+          onSelectOpening={(oid) => {
+            setSelectedOpeningId(oid);
+            if (oid) setSelectedWallId(null);
+          }}
           selectedRoomId={selectedRoomId}
-          onSelectRoom={setSelectedRoomId}
+          onSelectRoom={(rid) => {
+            setSelectedRoomId(rid);
+            if (rid) {
+              setSelectedWallId(null);
+              setSelectedOpeningId(null);
+            }
+          }}
           customRoomTypes={customRoomTypes}
           onCycleRoomType={handleCycleRoomType}
           onAddWall={handleAddWall}
+          onAddOpening={handleAddOpening}
+          onUpdateOpening={handleUpdateOpening}
+          onDeleteOpening={handleDeleteOpening}
           onUpdateNodePosition={handleUpdateNodePosition}
           onDeleteWall={handleDeleteWall}
           onDeleteNode={handleDeleteNode}
@@ -508,6 +641,9 @@ export default function App() {
           settings={settings}
           onUpdateSettings={setSettings}
           selectedWall={walls.find((w) => w.id === selectedWallId) || null}
+          selectedOpening={openings.find((o) => o.id === selectedOpeningId) || null}
+          onUpdateOpening={handleUpdateOpening}
+          onDeleteOpening={handleDeleteOpening}
           selectedRoom={selectedRoom}
           onChangeRoomType={handleChangeRoomType}
           nodes={nodes}

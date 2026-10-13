@@ -9,12 +9,17 @@ import {
   Info,
   Maximize,
   Ruler,
+  DoorOpen,
+  AppWindow,
+  RotateCw,
+  Trash2,
 } from 'lucide-react';
 import {
   BlueprintLevel,
   ValidationResult,
   DraftingSettings,
   Wall,
+  WallOpening,
   Node,
   UploadedFloorPlan,
   ClosedRoom,
@@ -33,6 +38,9 @@ interface RightInspectorHUDProps {
   selectedWall: Wall | null;
   selectedRoom?: ClosedRoom | null;
   onChangeRoomType?: (roomId: string, newType: RoomType) => void;
+  selectedOpening?: WallOpening | null;
+  onUpdateOpening?: (openingId: string, updates: Partial<WallOpening>) => void;
+  onDeleteOpening?: (openingId: string) => void;
   nodes: Node[];
   onDeleteWall: (wallId: string) => void;
   onOpenCalibrate: () => void;
@@ -51,6 +59,9 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
   selectedWall,
   selectedRoom,
   onChangeRoomType,
+  selectedOpening,
+  onUpdateOpening,
+  onDeleteOpening,
   nodes,
   onDeleteWall,
   onOpenCalibrate,
@@ -245,6 +256,87 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Selected Opening Inspector (When a Door or Window is clicked) */}
+        {selectedOpening && (
+          <div className="bg-sky-50/80 rounded-xl p-3 border border-sky-300 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-sky-900 flex items-center gap-1.5">
+                {selectedOpening.type === 'door' ? (
+                  <DoorOpen className="w-4 h-4 text-sky-600" />
+                ) : (
+                  <AppWindow className="w-4 h-4 text-sky-600" />
+                )}
+                {selectedOpening.type === 'door' ? 'Door Opening' : 'Window Opening'}
+              </span>
+              {onDeleteOpening && (
+                <button
+                  onClick={() => onDeleteOpening(selectedOpening.id)}
+                  className="text-[11px] text-rose-600 hover:text-rose-700 hover:underline font-medium flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Delete
+                </button>
+              )}
+            </div>
+
+            {/* Opening Width Presets */}
+            <div>
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                Opening Width
+              </span>
+              <div className="grid grid-cols-4 gap-1">
+                {(selectedOpening.type === 'door'
+                  ? [0.7, 0.8, 0.9, 1.0]
+                  : [0.9, 1.2, 1.5, 1.8]
+                ).map((w) => {
+                  const isCurrent = Math.abs(selectedOpening.widthMeters - w) < 0.01;
+                  return (
+                    <button
+                      key={w}
+                      onClick={() => onUpdateOpening && onUpdateOpening(selectedOpening.id, { widthMeters: w })}
+                      className={`px-1.5 py-1 rounded text-[10px] font-semibold text-center border transition-colors ${
+                        isCurrent
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                          : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {w.toFixed(2)}m
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Door Swing Controls */}
+            {selectedOpening.type === 'door' && onUpdateOpening && (
+              <div className="pt-2 border-t border-sky-200/60 flex items-center justify-between gap-2">
+                <button
+                  onClick={() =>
+                    onUpdateOpening(selectedOpening.id, {
+                      swingDirection: selectedOpening.swingDirection === 'right' ? 'left' : 'right',
+                    })
+                  }
+                  className="flex-1 px-2 py-1 bg-white hover:bg-sky-50 text-sky-800 text-[10px] font-semibold rounded-lg border border-sky-200 flex items-center justify-center gap-1 shadow-2xs"
+                >
+                  <RotateCw className="w-3 h-3" />
+                  Hinge: {selectedOpening.swingDirection === 'right' ? 'Right' : 'Left'}
+                </button>
+
+                <button
+                  onClick={() =>
+                    onUpdateOpening(selectedOpening.id, {
+                      swingFlip: !selectedOpening.swingFlip,
+                    })
+                  }
+                  className="flex-1 px-2 py-1 bg-white hover:bg-sky-50 text-sky-800 text-[10px] font-semibold rounded-lg border border-sky-200 flex items-center justify-center gap-1 shadow-2xs"
+                >
+                  <span>Flip Swing (F)</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Selected Wall Inspector (When a wall is clicked) */}
         {selectedWall && (

@@ -1,7 +1,8 @@
-import React from 'react';
 import {
   MousePointer2,
   PenTool,
+  DoorOpen,
+  AppWindow,
   Ruler,
   Sliders,
   Eraser,
@@ -29,9 +30,11 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   const tools: { id: ToolType; label: string; shortcut: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'select', label: 'Select & Move', shortcut: 'V', icon: MousePointer2 },
     { id: 'wall', label: 'Draw Wall', shortcut: 'W', icon: PenTool },
+    { id: 'door', label: 'Door Opening', shortcut: 'D', icon: DoorOpen },
+    { id: 'window', label: 'Window Opening', shortcut: 'N', icon: AppWindow },
     { id: 'measure', label: 'Tape Measure', shortcut: 'M', icon: Ruler },
     { id: 'calibrate', label: 'Calibrate Scale', shortcut: 'C', icon: Sliders },
-    { id: 'erase', label: 'Erase Wall', shortcut: 'E', icon: Eraser },
+    { id: 'erase', label: 'Erase Wall / Opening', shortcut: 'E', icon: Eraser },
     { id: 'pan', label: 'Pan Canvas', shortcut: 'Space', icon: Hand },
   ];
 
