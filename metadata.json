@@ -1,0 +1,6 @@
+{
+  "name": "Blueprint Studio 2D",
+  "description": "A precision 2D architectural blueprint drafting game inspired by Planner 5D. Trace and draft walls, measure room dimensions accurately, and fulfill client floor plan challenges.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
