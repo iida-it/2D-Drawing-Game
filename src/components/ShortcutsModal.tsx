@@ -10,6 +10,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const toolShortcuts = [
+    { key: 'Tab / 3', desc: 'Toggle 2D Blueprint / 3D Walkthrough' },
     { key: 'V', desc: 'Select & Move Tool' },
     { key: 'W', desc: 'Draw Wall Tool' },
     { key: 'D', desc: 'Door Opening Tool (Snap to wall)' },

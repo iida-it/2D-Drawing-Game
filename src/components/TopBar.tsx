@@ -15,7 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { BlueprintLevel, UploadedFloorPlan } from '../types';
-import { UploadCloud } from 'lucide-react';
+import { UploadCloud, Box } from 'lucide-react';
 
 interface TopBarProps {
   levels: BlueprintLevel[];
@@ -39,6 +39,8 @@ interface TopBarProps {
   onSubmit: () => void;
   drawnWallsCount: number;
   hasClosedRooms: boolean;
+  viewMode: '2d' | '3d';
+  onToggleViewMode: (mode: '2d' | '3d') => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -63,6 +65,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onSubmit,
   drawnWallsCount,
   hasClosedRooms,
+  viewMode,
+  onToggleViewMode,
 }) => {
   const [levelDropdownOpen, setLevelDropdownOpen] = React.useState(false);
 
@@ -80,7 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 Blueprint Studio 2D
               </span>
               <span className="text-[11px] font-medium text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200/60">
-                CAD Mode
+                {viewMode === '3d' ? '3D Walkthrough' : 'CAD Mode'}
               </span>
             </div>
           </div>
@@ -188,68 +192,104 @@ export const TopBar: React.FC<TopBarProps> = ({
         )}
       </div>
 
-      {/* Center Tools: Undo, Redo, Zoom Controls */}
-      <div className="flex items-center gap-1.5 bg-slate-100/90 p-1 rounded-xl border border-slate-200/70">
-        <button
-          onClick={onUndo}
-          disabled={!canUndo}
-          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-35 disabled:hover:bg-transparent transition-all"
-          title="Undo (Ctrl+Z)"
-        >
-          <Undo2 className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onRedo}
-          disabled={!canRedo}
-          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-35 disabled:hover:bg-transparent transition-all"
-          title="Redo (Ctrl+Y)"
-        >
-          <Redo2 className="w-4 h-4" />
-        </button>
+      {/* Center Section: 2D/3D Toggle Switcher + CAD Controls */}
+      <div className="flex items-center gap-2.5">
+        {/* Clean 2D / 3D Mode Toggle Switcher */}
+        <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 shadow-2xs">
+          <button
+            onClick={() => onToggleViewMode('2d')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === '2d'
+                ? 'bg-white text-sky-800 shadow-2xs'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
+            }`}
+            title="Switch to 2D Blueprint Drafting Mode (Tab)"
+          >
+            <Compass className="w-3.5 h-3.5 text-sky-600" />
+            <span>2D Drafting</span>
+          </button>
+          <button
+            onClick={() => onToggleViewMode('3d')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === '3d'
+                ? 'bg-sky-600 text-white shadow-2xs shadow-sky-200'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
+            }`}
+            title="Switch to 3D Architectural Walkthrough Mode (Tab)"
+          >
+            <Box className="w-3.5 h-3.5" />
+            <span>3D Model</span>
+            {hasClosedRooms && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            )}
+          </button>
+        </div>
 
-        <div className="h-4 w-px bg-slate-200 mx-0.5" />
+        {/* Center Tools: Undo, Redo, Zoom Controls (active in 2D mode) */}
+        {viewMode === '2d' && (
+          <div className="flex items-center gap-1.5 bg-slate-100/90 p-1 rounded-xl border border-slate-200/70">
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-35 disabled:hover:bg-transparent transition-all"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-35 disabled:hover:bg-transparent transition-all"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo2 className="w-4 h-4" />
+            </button>
 
-        <button
-          onClick={onZoomOut}
-          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
-          title="Zoom Out (-)"
-        >
-          <ZoomOut className="w-4 h-4" />
-        </button>
+            <div className="h-4 w-px bg-slate-200 mx-0.5" />
 
-        <button
-          onClick={onResetZoom}
-          className="px-2 py-1 rounded-lg text-xs font-mono font-medium text-slate-700 hover:bg-white hover:text-slate-900 transition-all min-w-[50px] text-center"
-          title="Reset Zoom to 100%"
-        >
-          {Math.round(zoom * 100)}%
-        </button>
+            <button
+              onClick={onZoomOut}
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
+              title="Zoom Out (-)"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
 
-        <button
-          onClick={onZoomIn}
-          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
-          title="Zoom In (+)"
-        >
-          <ZoomIn className="w-4 h-4" />
-        </button>
+            <button
+              onClick={onResetZoom}
+              className="px-2 py-1 rounded-lg text-xs font-mono font-medium text-slate-700 hover:bg-white hover:text-slate-900 transition-all min-w-[50px] text-center"
+              title="Reset Zoom to 100%"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
 
-        <button
-          onClick={onResetZoom}
-          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
-          title="Reset View"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
+            <button
+              onClick={onZoomIn}
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
+              title="Zoom In (+)"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
 
-        <div className="h-4 w-px bg-slate-200 mx-0.5" />
+            <button
+              onClick={onResetZoom}
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
+              title="Reset View"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
 
-        <button
-          onClick={onClear}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-all"
-          title="Clear all drafted walls"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+            <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+            <button
+              onClick={onClear}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-all"
+              title="Clear all drafted walls"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Right Actions: Sound, Help, Submit */}

@@ -22,6 +22,7 @@ import { SubmitModal } from './components/SubmitModal';
 import { CalibrateModal } from './components/CalibrateModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { UploadModal } from './components/UploadModal';
+import { Viewport3D } from './components/Viewport3D';
 
 interface HistoryState {
   nodes: Node[];
@@ -32,6 +33,7 @@ interface HistoryState {
 export default function App() {
   const [currentLevel, setCurrentLevel] = useState<BlueprintLevel>(LEVELS[0]);
   const [customFloorPlan, setCustomFloorPlan] = useState<UploadedFloorPlan | null>(null);
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   const [nodes, setNodes] = useState<Node[]>([]);
   const [walls, setWalls] = useState<Wall[]>([]);
   const [openings, setOpenings] = useState<WallOpening[]>([]);
@@ -473,6 +475,18 @@ export default function App() {
       }
 
       // Toggles
+      if (e.key === 'Tab' || e.key === '3') {
+        e.preventDefault();
+        setViewMode((prev) => {
+          const next = prev === '2d' ? '3d' : '2d';
+          setToastNotification(
+            next === '3d'
+              ? 'Switched to 3D Architectural Model (Three.js active)'
+              : 'Switched to 2D Blueprint Drafting (Three.js render loop stopped)'
+          );
+          return next;
+        });
+      }
       if (e.key === 's' || e.key === 'S') {
         setSettings((prev) => ({ ...prev, snapToGrid: !prev.snapToGrid }));
       }
@@ -552,6 +566,8 @@ export default function App() {
         onSubmit={() => setIsSubmitModalOpen(true)}
         drawnWallsCount={walls.length}
         hasClosedRooms={liveValidation.detectedRoomsCount > 0}
+        viewMode={viewMode}
+        onToggleViewMode={setViewMode}
       />
 
       {/* Toast Notification Banner */}
@@ -569,89 +585,105 @@ export default function App() {
 
       {/* 2. MAIN WORKSPACE */}
       <div className="relative flex-1 w-full h-[calc(100vh-56px)] overflow-hidden">
-        {/* LEFT FLOATING TOOLBAR */}
-        <LeftToolbar
-          activeTool={activeTool}
-          onSelectTool={(t) => {
-            setActiveTool(t);
-            if (t === 'calibrate') {
-              handleStartCalibrationTool();
-            } else if (t === 'door') {
-              setToastNotification('🚪 Door Opening Tool: Hover over any wall to snap a door opening.');
-            } else if (t === 'window') {
-              setToastNotification('🪟 Window Opening Tool: Hover over any wall to snap a window opening.');
-            }
-          }}
-          settings={settings}
-          onUpdateSettings={setSettings}
-        />
-
-        {/* CENTER HTML5 DUAL-LAYER CANVAS */}
-        <Canvas2D
-          currentLevel={currentLevel}
-          customFloorPlan={customFloorPlan}
+        {/* 3D ARCHITECTURAL VIEWPORT (Three.js WebGL with auto loop management) */}
+        <Viewport3D
+          active={viewMode === '3d'}
           nodes={nodes}
           walls={walls}
           openings={openings}
-          activeTool={activeTool}
-          settings={settings}
-          selectedWallId={selectedWallId}
-          onSelectWall={(wid) => {
-            setSelectedWallId(wid);
-            if (wid) setSelectedOpeningId(null);
-          }}
-          selectedOpeningId={selectedOpeningId}
-          onSelectOpening={(oid) => {
-            setSelectedOpeningId(oid);
-            if (oid) setSelectedWallId(null);
-          }}
-          selectedRoomId={selectedRoomId}
-          onSelectRoom={(rid) => {
-            setSelectedRoomId(rid);
-            if (rid) {
-              setSelectedWallId(null);
-              setSelectedOpeningId(null);
-            }
-          }}
-          customRoomTypes={customRoomTypes}
-          onCycleRoomType={handleCycleRoomType}
-          onAddWall={handleAddWall}
-          onAddOpening={handleAddOpening}
-          onUpdateOpening={handleUpdateOpening}
-          onDeleteOpening={handleDeleteOpening}
-          onUpdateNodePosition={handleUpdateNodePosition}
-          onDeleteWall={handleDeleteWall}
-          onDeleteNode={handleDeleteNode}
-          zoom={zoom}
-          pan={pan}
-          onPanZoomChange={(newPan, newZoom) => {
-            setPan(newPan);
-            setZoom(newZoom);
-          }}
-          onMeasuredDistance={handleMeasuredDistance}
+          closedRooms={detectedRooms}
+          scaleFactor={settings.scaleFactor}
+          onSwitchTo2D={() => setViewMode('2d')}
         />
 
-        {/* RIGHT INSPECTOR HUD */}
-        <RightInspectorHUD
-          currentLevel={currentLevel}
-          customFloorPlan={customFloorPlan}
-          onOpenUpload={() => setIsUploadModalOpen(true)}
-          onStartCalibrationTool={handleStartCalibrationTool}
-          liveValidation={liveValidation}
-          settings={settings}
-          onUpdateSettings={setSettings}
-          selectedWall={walls.find((w) => w.id === selectedWallId) || null}
-          selectedOpening={openings.find((o) => o.id === selectedOpeningId) || null}
-          onUpdateOpening={handleUpdateOpening}
-          onDeleteOpening={handleDeleteOpening}
-          selectedRoom={selectedRoom}
-          onChangeRoomType={handleChangeRoomType}
-          nodes={nodes}
-          onDeleteWall={handleDeleteWall}
-          onOpenCalibrate={() => setIsCalibrateModalOpen(true)}
-          isCollapsed={isInspectorCollapsed}
-          onToggleCollapse={() => setIsInspectorCollapsed(!isInspectorCollapsed)}
-        />
+        {/* 2D BLUEPRINT DRAFTING MODE */}
+        {viewMode === '2d' && (
+          <>
+            {/* LEFT FLOATING TOOLBAR */}
+            <LeftToolbar
+              activeTool={activeTool}
+              onSelectTool={(t) => {
+                setActiveTool(t);
+                if (t === 'calibrate') {
+                  handleStartCalibrationTool();
+                } else if (t === 'door') {
+                  setToastNotification('🚪 Door Opening Tool: Hover over any wall to snap a door opening.');
+                } else if (t === 'window') {
+                  setToastNotification('🪟 Window Opening Tool: Hover over any wall to snap a window opening.');
+                }
+              }}
+              settings={settings}
+              onUpdateSettings={setSettings}
+            />
+
+            {/* CENTER HTML5 DUAL-LAYER CANVAS */}
+            <Canvas2D
+              currentLevel={currentLevel}
+              customFloorPlan={customFloorPlan}
+              nodes={nodes}
+              walls={walls}
+              openings={openings}
+              activeTool={activeTool}
+              settings={settings}
+              selectedWallId={selectedWallId}
+              onSelectWall={(wid) => {
+                setSelectedWallId(wid);
+                if (wid) setSelectedOpeningId(null);
+              }}
+              selectedOpeningId={selectedOpeningId}
+              onSelectOpening={(oid) => {
+                setSelectedOpeningId(oid);
+                if (oid) setSelectedWallId(null);
+              }}
+              selectedRoomId={selectedRoomId}
+              onSelectRoom={(rid) => {
+                setSelectedRoomId(rid);
+                if (rid) {
+                  setSelectedWallId(null);
+                  setSelectedOpeningId(null);
+                }
+              }}
+              customRoomTypes={customRoomTypes}
+              onCycleRoomType={handleCycleRoomType}
+              onAddWall={handleAddWall}
+              onAddOpening={handleAddOpening}
+              onUpdateOpening={handleUpdateOpening}
+              onDeleteOpening={handleDeleteOpening}
+              onUpdateNodePosition={handleUpdateNodePosition}
+              onDeleteWall={handleDeleteWall}
+              onDeleteNode={handleDeleteNode}
+              zoom={zoom}
+              pan={pan}
+              onPanZoomChange={(newPan, newZoom) => {
+                setPan(newPan);
+                setZoom(newZoom);
+              }}
+              onMeasuredDistance={handleMeasuredDistance}
+            />
+
+            {/* RIGHT INSPECTOR HUD */}
+            <RightInspectorHUD
+              currentLevel={currentLevel}
+              customFloorPlan={customFloorPlan}
+              onOpenUpload={() => setIsUploadModalOpen(true)}
+              onStartCalibrationTool={handleStartCalibrationTool}
+              liveValidation={liveValidation}
+              settings={settings}
+              onUpdateSettings={setSettings}
+              selectedWall={walls.find((w) => w.id === selectedWallId) || null}
+              selectedOpening={openings.find((o) => o.id === selectedOpeningId) || null}
+              onUpdateOpening={handleUpdateOpening}
+              onDeleteOpening={handleDeleteOpening}
+              selectedRoom={selectedRoom}
+              onChangeRoomType={handleChangeRoomType}
+              nodes={nodes}
+              onDeleteWall={handleDeleteWall}
+              onOpenCalibrate={() => setIsCalibrateModalOpen(true)}
+              isCollapsed={isInspectorCollapsed}
+              onToggleCollapse={() => setIsInspectorCollapsed(!isInspectorCollapsed)}
+            />
+          </>
+        )}
       </div>
 
       {/* 3. MODALS */}
