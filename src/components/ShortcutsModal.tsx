@@ -12,19 +12,22 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   if (!isOpen) return null;
 
   const toolShortcuts = [
-    { key: 'Tab / 3', desc: t('scToggle2D3D') },
-    { key: 'W / E / R', desc: t('sc3DGizmo') },
     { key: 'V', desc: t('scSelectMove') },
-    { key: 'W (in 2D)', desc: t('scDrawWall') },
+    { key: 'P / L', desc: t('scDrawWall') },
     { key: 'D', desc: t('scDoorTool') },
-    { key: 'N', desc: t('scWindowTool') },
+    { key: 'B', desc: t('toolDoubleDoor') || 'Double Door' },
+    { key: 'S', desc: t('toolSlidingDoor') || 'Sliding Door' },
+    { key: 'W', desc: t('scWindowTool') },
     { key: 'M', desc: t('scMeasureTool') },
     { key: 'C', desc: t('scCalibrateTool') },
-    { key: 'E (in 2D)', desc: t('scEraseTool') },
-    { key: 'F', desc: t('scFlipSwing') },
-    { key: 'S', desc: t('scGridSnap') },
+    { key: 'E', desc: t('scEraseTool') },
+    { key: 'H', desc: t('toolPan') || 'Pan Tool' },
+    { key: 'Shift+S / X', desc: t('scGridSnap') },
     { key: 'O', desc: t('scOrthoAngle') },
     { key: 'G', desc: t('scGhostLayer') },
+    { key: 'F', desc: t('scFlipSwing') },
+    { key: 'Tab / 3', desc: t('scToggle2D3D') },
+    { key: 'W/E/R (3D)', desc: t('sc3DGizmo') },
   ];
 
   const canvasShortcuts = [

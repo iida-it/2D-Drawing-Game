@@ -42,19 +42,19 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     category?: 'draft' | 'openings' | 'measure';
   }[] = [
     { id: 'select', label: t('toolSelect'), shortcut: 'V', icon: MousePointer2, category: 'draft' },
-    { id: 'wall', label: t('toolWall'), shortcut: 'W', icon: PenTool, category: 'draft' },
+    { id: 'wall', label: t('toolWall'), shortcut: 'P', icon: PenTool, category: 'draft' },
 
     // Standard Architectural Openings
     { id: 'door', label: t('toolSingleDoor'), sublabel: t('toolSingleDoorSub'), shortcut: 'D', icon: DoorOpen, category: 'openings' },
     { id: 'double-door', label: t('toolDoubleDoor'), sublabel: t('toolDoubleDoorSub'), shortcut: 'B', icon: SplitSquareVertical, category: 'openings' },
-    { id: 'sliding-door', label: t('toolSlidingDoor'), sublabel: t('toolSlidingDoorSub'), shortcut: 'L', icon: SlidersHorizontal, category: 'openings' },
-    { id: 'window', label: t('toolWindow'), sublabel: t('toolWindowSub'), shortcut: 'N', icon: AppWindow, category: 'openings' },
+    { id: 'sliding-door', label: t('toolSlidingDoor'), sublabel: t('toolSlidingDoorSub'), shortcut: 'S', icon: SlidersHorizontal, category: 'openings' },
+    { id: 'window', label: t('toolWindow'), sublabel: t('toolWindowSub'), shortcut: 'W', icon: AppWindow, category: 'openings' },
 
     // Measurement & Utilities
     { id: 'measure', label: t('toolMeasure'), shortcut: 'M', icon: Ruler, category: 'measure' },
     { id: 'calibrate', label: t('toolCalibrate'), shortcut: 'C', icon: Sliders, category: 'measure' },
     { id: 'erase', label: t('toolErase'), shortcut: 'E', icon: Eraser, category: 'measure' },
-    { id: 'pan', label: t('toolPan'), shortcut: 'Space', icon: Hand, category: 'measure' },
+    { id: 'pan', label: t('toolPan'), shortcut: 'H', icon: Hand, category: 'measure' },
   ];
 
   const toggleSnap = () => {
@@ -91,6 +91,17 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
               >
                 <Icon className="w-5 h-5 stroke-[2.2]" />
 
+                {/* Corner Shortcut Key Badge */}
+                <span
+                  className={`absolute bottom-0.5 right-1 text-[9px] font-mono font-bold px-1 rounded leading-none transition-colors select-none pointer-events-none ${
+                    isActive
+                      ? 'bg-sky-700/90 text-sky-100 border border-sky-400/30'
+                      : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200 group-hover:text-slate-800 border border-slate-200/60'
+                  }`}
+                >
+                  {item.shortcut}
+                </span>
+
                 {/* Tooltip */}
                 <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-white text-[11px] font-medium rounded-lg shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 flex items-center gap-2">
                   <div className="flex flex-col text-left">
@@ -119,7 +130,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
               : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
           }`}
-          title={`${t('gridSnap')} (S)`}
+          title={`${t('gridSnap')} (Shift+S)`}
         >
           <Grid3X3 className="w-5 h-5 stroke-[2]" />
           {settings.snapToGrid && (
@@ -129,7 +140,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
           <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-white text-[11px] font-medium rounded-lg shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 flex items-center gap-1.5">
             <span>{settings.snapToGrid ? t('gridSnapOn') : t('gridSnapOff')}</span>
             <kbd className="bg-slate-700 text-slate-200 px-1.5 py-0.5 rounded text-[10px] font-mono">
-              S
+              Shift+S
             </kbd>
           </div>
         </button>

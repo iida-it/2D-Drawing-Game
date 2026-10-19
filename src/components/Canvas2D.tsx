@@ -144,6 +144,32 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const [dragStartScreen, setDragStartScreen] = useState<Point>({ x: 0, y: 0 });
   const [dragStartPan, setDragStartPan] = useState<Point>({ x: 0, y: 0 });
+  const didPanWithRightClickRef = useRef<boolean>(false);
+
+  // Marquee Box Drag Selection in Select Tool
+  const [isMarqueeDragging, setIsMarqueeDragging] = useState<boolean>(false);
+  const [marqueeStart, setMarqueeStart] = useState<Point | null>(null);
+  const [marqueeCurrent, setMarqueeCurrent] = useState<Point | null>(null);
+  const [selectedWallIds, setSelectedWallIds] = useState<string[]>([]);
+  const [selectedOpeningIds, setSelectedOpeningIds] = useState<string[]>([]);
+  const [selectedFurnitureIndices, setSelectedFurnitureIndices] = useState<number[]>([]);
+
+  // Keep selectedWallIds and selectedOpeningIds in sync with props
+  useEffect(() => {
+    if (selectedWallId) {
+      setSelectedWallIds((prev) => (prev.includes(selectedWallId) ? prev : [selectedWallId]));
+    } else {
+      setSelectedWallIds([]);
+    }
+  }, [selectedWallId]);
+
+  useEffect(() => {
+    if (selectedOpeningId) {
+      setSelectedOpeningIds((prev) => (prev.includes(selectedOpeningId) ? prev : [selectedOpeningId]));
+    } else {
+      setSelectedOpeningIds([]);
+    }
+  }, [selectedOpeningId]);
 
   // Moving node in select mode
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
@@ -174,6 +200,16 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     setClosedRooms(rooms);
   }, [nodes, walls, settings.scaleFactor, customRoomTypes]);
 
+  // Cleanly reset active drafting and measuring state when active tool changes
+  useEffect(() => {
+    setActiveDrawingNode(null);
+    setMeasureStartPoint(null);
+    setCalibratePointA(null);
+    setIsMarqueeDragging(false);
+    setMarqueeStart(null);
+    setMarqueeCurrent(null);
+  }, [activeTool]);
+
   // Coordinate Conversion: Screen to World
   const screenToWorld = useCallback(
     (screenX: number, screenY: number): Point => {
@@ -199,14 +235,23 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   // Auto-focus and select dimension input text when editing begins
   useEffect(() => {
     if (activeEditingDimension && dimensionInputRef.current) {
-      dimensionInputRef.current.focus();
-      dimensionInputRef.current.select();
+      const input = dimensionInputRef.current;
+      input.focus();
+      requestAnimationFrame(() => {
+        if (input) {
+          if (input.value.length === 1 && /[\d.]/.test(input.value)) {
+            input.setSelectionRange(input.value.length, input.value.length);
+          } else {
+            input.select();
+          }
+        }
+      });
     }
   }, [activeEditingDimension]);
 
-  // Check if screen coordinates hit any wall dimension label
-  const checkDimensionBadgeClick = useCallback(
-    (screenX: number, screenY: number): {
+  // Helper to compute badge position and metrics for any wall
+  const getWallDimensionBadge = useCallback(
+    (w: Wall): {
       wall: Wall;
       n1: Node;
       n2: Node;
@@ -215,7 +260,77 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     } | null => {
       const nodeMap = new Map<string, Node>();
       nodes.forEach((n) => nodeMap.set(n.id, n));
+      const n1 = nodeMap.get(w.startNodeId);
+      const n2 = nodeMap.get(w.endNodeId);
+      if (!n1 || !n2) return null;
 
+      const dx = n2.x - n1.x;
+      const dy = n2.y - n1.y;
+      const lenPx = Math.hypot(dx, dy);
+      if (lenPx < 1e-4) return null;
+
+      const wallDistMeters = pixelsToMeters(lenPx, settings.scaleFactor);
+      const wallOpenings = openings.filter((o) => o.wallId === w.id);
+      const hasOpenings = wallOpenings.length > 0;
+
+      // Position matches dimension line offset
+      const offsetDist = (hasOpenings ? 36 : 18) / zoom;
+      const nx = -dy / lenPx;
+      const ny = dx / lenPx;
+      const midX = (n1.x + n2.x) / 2;
+      const midY = (n1.y + n2.y) / 2;
+
+      const badgeWorld: Point = {
+        x: midX + nx * offsetDist,
+        y: midY + ny * offsetDist,
+      };
+
+      return {
+        wall: w,
+        n1,
+        n2,
+        currentLengthMeters: wallDistMeters,
+        centerWorld: badgeWorld,
+      };
+    },
+    [nodes, openings, settings.scaleFactor, zoom]
+  );
+
+  // Open dimension editing overlay for a wall
+  const openDimensionInputForWall = useCallback(
+    (wall: Wall, initialChar?: string) => {
+      const badgeInfo = getWallDimensionBadge(wall);
+      if (!badgeInfo) return;
+
+      // Cancel any in-progress drawing chain when editing dimension
+      setActiveDrawingNode(null);
+
+      onSelectWall(wall.id);
+      setSelectedWallIds([wall.id]);
+      if (onSelectOpening) onSelectOpening(null);
+      if (onSelectRoom) onSelectRoom(null);
+
+      setActiveEditingDimension({
+        wallId: wall.id,
+        startNodeId: badgeInfo.n1.id,
+        endNodeId: badgeInfo.n2.id,
+        currentLengthMeters: badgeInfo.currentLengthMeters,
+        badgeWorldPos: badgeInfo.centerWorld,
+      });
+
+      if (initialChar !== undefined) {
+        setDimensionInputValue(initialChar);
+      } else {
+        setDimensionInputValue(badgeInfo.currentLengthMeters.toFixed(2));
+      }
+      soundEngine.playPencilClick();
+    },
+    [getWallDimensionBadge, onSelectWall, onSelectOpening, onSelectRoom]
+  );
+
+  // Check if screen coordinates hit any wall dimension label
+  const checkDimensionBadgeClick = useCallback(
+    (screenX: number, screenY: number) => {
       // Prioritize checking selected wall first
       const candidateWalls = selectedWallId
         ? [
@@ -225,50 +340,21 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         : walls;
 
       for (const w of candidateWalls) {
-        const n1 = nodeMap.get(w.startNodeId);
-        const n2 = nodeMap.get(w.endNodeId);
-        if (!n1 || !n2) continue;
+        const badgeInfo = getWallDimensionBadge(w);
+        if (!badgeInfo) continue;
 
-        const dx = n2.x - n1.x;
-        const dy = n2.y - n1.y;
-        const lenPx = Math.hypot(dx, dy);
-        if (lenPx < 1e-4) continue;
-
-        const wallDistMeters = pixelsToMeters(lenPx, settings.scaleFactor);
-        const wallOpenings = openings.filter((o) => o.wallId === w.id);
-        const hasOpenings = wallOpenings.length > 0;
-
-        // Position matches dimension line offset
-        const offsetDist = (hasOpenings ? 36 : 18) / zoom;
-        const nx = -dy / lenPx;
-        const ny = dx / lenPx;
-        const midX = (n1.x + n2.x) / 2;
-        const midY = (n1.y + n2.y) / 2;
-
-        const badgeWorld: Point = {
-          x: midX + nx * offsetDist,
-          y: midY + ny * offsetDist,
-        };
-
-        const badgeScreen = worldToScreen(badgeWorld.x, badgeWorld.y);
+        const badgeScreen = worldToScreen(badgeInfo.centerWorld.x, badgeInfo.centerWorld.y);
         const distX = Math.abs(screenX - badgeScreen.x);
         const distY = Math.abs(screenY - badgeScreen.y);
 
-        // Click target area around the badge
+        // Click target area around badge
         if (distX <= 48 && distY <= 18) {
-          return {
-            wall: w,
-            n1,
-            n2,
-            currentLengthMeters: wallDistMeters,
-            centerWorld: badgeWorld,
-          };
+          return badgeInfo;
         }
       }
-
       return null;
     },
-    [nodes, walls, openings, selectedWallId, settings.scaleFactor, worldToScreen, zoom]
+    [getWallDimensionBadge, selectedWallId, walls, worldToScreen]
   );
 
   // Commit new wall dimension using unit vector scaling formula
@@ -571,13 +657,14 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       });
 
       // Blueprint Furniture Blocks (Light Blueprint silhouettes)
-      currentLevel.ghostSvgElements.furniture.forEach((f) => {
+      currentLevel.ghostSvgElements.furniture.forEach((f, idx) => {
+        const isFurnSelected = selectedFurnitureIndices.includes(idx);
         ctx.save();
         ctx.translate(f.x, f.y);
         if (f.angle) ctx.rotate((f.angle * Math.PI) / 180);
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 1.2 / zoom;
-        ctx.fillStyle = 'rgba(224, 242, 254, 0.4)';
+        ctx.strokeStyle = isFurnSelected ? '#0284c7' : '#60a5fa';
+        ctx.lineWidth = (isFurnSelected ? 2.5 : 1.2) / zoom;
+        ctx.fillStyle = isFurnSelected ? 'rgba(56, 189, 248, 0.45)' : 'rgba(224, 242, 254, 0.4)';
         ctx.fillRect(-f.width / 2, -f.height / 2, f.width, f.height);
         ctx.strokeRect(-f.width / 2, -f.height / 2, f.width, f.height);
 
@@ -720,7 +807,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       const n2 = nodeMap.get(w.endNodeId);
       if (!n1 || !n2) return;
 
-      const isSelected = selectedWallId === w.id;
+      const isSelected = selectedWallId === w.id || selectedWallIds.includes(w.id);
       const isHovered = hoveredWall?.id === w.id;
       const wallOpenings = openings.filter((o) => o.wallId === w.id);
 
@@ -888,7 +975,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
         // 2. Draw openings: Single Door, Double Door, Sliding Door, and Window
         breakdown.openings.forEach((op) => {
-          const isOpSelected = selectedOpeningId === op.opening.id;
+          const isOpSelected = selectedOpeningId === op.opening.id || selectedOpeningIds.includes(op.opening.id);
           const isOpHovered = hoveredOpening?.id === op.opening.id;
           const p1 = op.startPt;
           const p2 = op.endPt;
@@ -1697,6 +1784,25 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       }
     }
 
+    // 2G: Marquee Drag Selection Box (Select Tool)
+    if (isMarqueeDragging && marqueeStart && marqueeCurrent) {
+      const minX = Math.min(marqueeStart.x, marqueeCurrent.x);
+      const maxX = Math.max(marqueeStart.x, marqueeCurrent.x);
+      const minY = Math.min(marqueeStart.y, marqueeCurrent.y);
+      const maxY = Math.max(marqueeStart.y, marqueeCurrent.y);
+      const boxW = maxX - minX;
+      const boxH = maxY - minY;
+
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
+      ctx.fillRect(minX, minY, boxW, boxH);
+
+      ctx.strokeStyle = '#0284c7';
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.setLineDash([4 / zoom, 3 / zoom]);
+      ctx.strokeRect(minX, minY, boxW, boxH);
+      ctx.setLineDash([]);
+    }
+
     ctx.restore();
     ctx.restore();
   }, [
@@ -1707,7 +1813,13 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     activeTool,
     settings,
     selectedWallId,
+    selectedWallIds,
     selectedOpeningId,
+    selectedOpeningIds,
+    selectedFurnitureIndices,
+    isMarqueeDragging,
+    marqueeStart,
+    marqueeCurrent,
     hoveredWall,
     hoveredNode,
     hoveredOpening,
@@ -1736,11 +1848,41 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         return;
       }
 
+      // Direct Type-to-Change Line Length:
+      // When any wall/line is selected, typing numbers ('0'-'9', '.', ',') immediately opens
+      // the dimension editor pre-filled with that keystroke without requiring a click on the badge.
+      if (
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (/^[\d.]$/.test(e.key) || e.key === ',')
+      ) {
+        const targetWallId =
+          selectedWallId || (selectedWallIds.length === 1 ? selectedWallIds[0] : null);
+        if (targetWallId) {
+          const targetWall = walls.find((w) => w.id === targetWallId);
+          if (targetWall) {
+            e.preventDefault();
+            const charToUse = e.key === ',' ? '.' : e.key;
+            openDimensionInputForWall(targetWall, charToUse);
+            return;
+          }
+        }
+      }
+
       if (e.code === 'Space') {
         setIsSpacePressed(true);
       }
       if (e.key === 'Shift') {
         setIsShiftPressed(true);
+      }
+      if (e.key === 'Enter') {
+        if (activeDrawingNode) {
+          e.preventDefault();
+          setActiveDrawingNode(null);
+          soundEngine.playWallComplete();
+          return;
+        }
       }
       if (e.key === 'Escape') {
         if (activeEditingDimension) {
@@ -1758,11 +1900,25 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         if (calibratePointA) {
           setCalibratePointA(null);
         }
+        if (isMarqueeDragging) {
+          setIsMarqueeDragging(false);
+          setMarqueeStart(null);
+          setMarqueeCurrent(null);
+        }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedWallId) {
+        if (selectedWallIds.length > 0) {
+          selectedWallIds.forEach((wid) => onDeleteWall(wid));
+          setSelectedWallIds([]);
+          onSelectWall(null);
+        } else if (selectedWallId) {
           onDeleteWall(selectedWallId);
           onSelectWall(null);
+        }
+        if (selectedOpeningIds.length > 0 && onDeleteOpening) {
+          selectedOpeningIds.forEach((oid) => onDeleteOpening(oid));
+          setSelectedOpeningIds([]);
+          if (onSelectOpening) onSelectOpening(null);
         } else if (selectedOpeningId && onDeleteOpening) {
           onDeleteOpening(selectedOpeningId);
           if (onSelectOpening) onSelectOpening(null);
@@ -1798,8 +1954,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   }, [
     activeDrawingNode,
     measureStartPoint,
+    calibratePointA,
     selectedWallId,
+    selectedWallIds,
+    walls,
+    openDimensionInputForWall,
+    activeEditingDimension,
+    isMarqueeDragging,
     selectedOpeningId,
+    selectedOpeningIds,
     openings,
     onDeleteWall,
     onSelectWall,
@@ -1841,16 +2004,25 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     const mouseScreenX = e.clientX - rect.left;
     const mouseScreenY = e.clientY - rect.top;
 
-    // Handle Pan Dragging (Middle mouse or Space + Left drag)
+    // Handle Pan Dragging (Middle mouse, Right mouse, Space + Left drag, or Pan Tool)
     if (isDraggingCanvas) {
       const dx = mouseScreenX - dragStartScreen.x;
       const dy = mouseScreenY - dragStartScreen.y;
+      if (Math.hypot(dx, dy) > 3) {
+        didPanWithRightClickRef.current = true;
+      }
       onPanZoomChange({ x: dragStartPan.x + dx, y: dragStartPan.y + dy }, zoom);
       return;
     }
 
     const world = screenToWorld(mouseScreenX, mouseScreenY);
     setCursorWorldPos(world);
+
+    // Handle Marquee Box dragging in Select Tool
+    if (isMarqueeDragging && marqueeStart) {
+      setMarqueeCurrent(world);
+      return;
+    }
 
     // Handle Node dragging in select tool
     if (activeTool === 'select' && draggingNodeId) {
@@ -1991,12 +2163,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     const mouseScreenX = e.clientX - rect.left;
     const mouseScreenY = e.clientY - rect.top;
 
-    // Pan Initiation: Middle click OR Space is held OR Pan Tool is active
-    if (e.button === 1 || isSpacePressed || activeTool === 'pan') {
+    // Pan Initiation: Middle click (1), Right click (2), Spacebar is pressed + Left click, or Pan Tool
+    if (e.button === 1 || e.button === 2 || isSpacePressed || activeTool === 'pan') {
       e.preventDefault();
       setIsDraggingCanvas(true);
       setDragStartScreen({ x: mouseScreenX, y: mouseScreenY });
       setDragStartPan({ ...pan });
+      if (e.button === 2) {
+        didPanWithRightClickRef.current = false;
+      }
       return;
     }
 
@@ -2005,19 +2180,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     // Check if user clicked directly on a dimension label
     const hitBadge = checkDimensionBadgeClick(mouseScreenX, mouseScreenY);
     if (hitBadge && !activeDrawingNode) {
-      onSelectWall(hitBadge.wall.id);
-      if (onSelectOpening) onSelectOpening(null);
-      if (onSelectRoom) onSelectRoom(null);
-
-      setActiveEditingDimension({
-        wallId: hitBadge.wall.id,
-        startNodeId: hitBadge.n1.id,
-        endNodeId: hitBadge.n2.id,
-        currentLengthMeters: hitBadge.currentLengthMeters,
-        badgeWorldPos: hitBadge.centerWorld,
-      });
-      setDimensionInputValue(hitBadge.currentLengthMeters.toFixed(2));
-      soundEngine.playPencilClick();
+      openDimensionInputForWall(hitBadge.wall);
       return;
     }
 
@@ -2039,7 +2202,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (activeTool === 'select') {
       if (hoveredOpening) {
         if (onSelectOpening) onSelectOpening(hoveredOpening.id);
+        setSelectedOpeningIds([hoveredOpening.id]);
         onSelectWall(null);
+        setSelectedWallIds([]);
+        setSelectedFurnitureIndices([]);
         if (onSelectRoom) onSelectRoom(null);
         soundEngine.playPencilClick();
       } else if (hoveredNode) {
@@ -2048,6 +2214,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         soundEngine.playPencilClick();
       } else if (hoveredWall) {
         onSelectWall(hoveredWall.id);
+        setSelectedWallIds([hoveredWall.id]);
+        setSelectedOpeningIds([]);
+        setSelectedFurnitureIndices([]);
         if (onSelectOpening) onSelectOpening(null);
         if (onSelectRoom) onSelectRoom(null);
         soundEngine.playPencilClick();
@@ -2055,10 +2224,20 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         if (onSelectRoom) onSelectRoom(hoveredRoomId);
         if (onCycleRoomType) onCycleRoomType(hoveredRoomId);
         onSelectWall(null);
+        setSelectedWallIds([]);
+        setSelectedOpeningIds([]);
+        setSelectedFurnitureIndices([]);
         if (onSelectOpening) onSelectOpening(null);
         soundEngine.playWallComplete();
       } else {
+        // Clicked on empty canvas space: initiate marquee / box drag selection
+        setIsMarqueeDragging(true);
+        setMarqueeStart(world);
+        setMarqueeCurrent(world);
         onSelectWall(null);
+        setSelectedWallIds([]);
+        setSelectedOpeningIds([]);
+        setSelectedFurnitureIndices([]);
         if (onSelectOpening) onSelectOpening(null);
         if (onSelectRoom) onSelectRoom(null);
       }
@@ -2186,6 +2365,112 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       setDraggingNodeId(null);
       soundEngine.playPencilClick();
     }
+
+    // Finish Marquee Box Drag Selection (Select Tool)
+    if (isMarqueeDragging && marqueeStart && marqueeCurrent) {
+      const minX = Math.min(marqueeStart.x, marqueeCurrent.x);
+      const maxX = Math.max(marqueeStart.x, marqueeCurrent.x);
+      const minY = Math.min(marqueeStart.y, marqueeCurrent.y);
+      const maxY = Math.max(marqueeStart.y, marqueeCurrent.y);
+      const boxW = maxX - minX;
+      const boxH = maxY - minY;
+
+      if (boxW > 3 / zoom || boxH > 3 / zoom) {
+        const nodeMap = new Map<string, Node>();
+        nodes.forEach((n) => nodeMap.set(n.id, n));
+
+        // 1. Find all walls inside or intersecting the marquee box
+        const matchedWallIds: string[] = [];
+        walls.forEach((w) => {
+          const n1 = nodeMap.get(w.startNodeId);
+          const n2 = nodeMap.get(w.endNodeId);
+          if (n1 && n2 && doesSegmentIntersectBox(n1, n2, minX, maxX, minY, maxY)) {
+            matchedWallIds.push(w.id);
+          }
+        });
+
+        // 2. Find all openings (doors, windows) inside or intersecting marquee box
+        const matchedOpeningIds: string[] = [];
+        openings.forEach((op) => {
+          const parentWall = walls.find((w) => w.id === op.wallId);
+          if (parentWall) {
+            const n1 = nodeMap.get(parentWall.startNodeId);
+            const n2 = nodeMap.get(parentWall.endNodeId);
+            if (n1 && n2) {
+              const opCenterX = n1.x + op.positionRatio * (n2.x - n1.x);
+              const opCenterY = n1.y + op.positionRatio * (n2.y - n1.y);
+              const opW = metersToPixels(op.widthMeters, settings.scaleFactor);
+              if (
+                doBoxesOverlap(
+                  opCenterX - opW / 2,
+                  opCenterX + opW / 2,
+                  opCenterY - opW / 2,
+                  opCenterY + opW / 2,
+                  minX,
+                  maxX,
+                  minY,
+                  maxY
+                )
+              ) {
+                matchedOpeningIds.push(op.id);
+              }
+            }
+          }
+        });
+
+        // 3. Find all furniture items inside or intersecting marquee box
+        const matchedFurniture: number[] = [];
+        if (currentLevel?.ghostSvgElements?.furniture) {
+          currentLevel.ghostSvgElements.furniture.forEach((f, idx) => {
+            if (
+              doBoxesOverlap(
+                f.x - f.width / 2,
+                f.x + f.width / 2,
+                f.y - f.height / 2,
+                f.y + f.height / 2,
+                minX,
+                maxX,
+                minY,
+                maxY
+              )
+            ) {
+              matchedFurniture.push(idx);
+            }
+          });
+        }
+
+        setSelectedWallIds(matchedWallIds);
+        setSelectedOpeningIds(matchedOpeningIds);
+        setSelectedFurnitureIndices(matchedFurniture);
+
+        // Set primary selection for inspector
+        if (matchedWallIds.length > 0) {
+          onSelectWall(matchedWallIds[0]);
+          if (onSelectOpening) onSelectOpening(null);
+          if (onSelectRoom) onSelectRoom(null);
+        } else if (matchedOpeningIds.length > 0) {
+          onSelectWall(null);
+          if (onSelectOpening) onSelectOpening(matchedOpeningIds[0]);
+          if (onSelectRoom) onSelectRoom(null);
+        } else {
+          onSelectWall(null);
+          if (onSelectOpening) onSelectOpening(null);
+          if (onSelectRoom) onSelectRoom(null);
+        }
+
+        if (
+          matchedWallIds.length > 0 ||
+          matchedOpeningIds.length > 0 ||
+          matchedFurniture.length > 0
+        ) {
+          soundEngine.playPencilClick();
+        }
+      }
+
+      setIsMarqueeDragging(false);
+      setMarqueeStart(null);
+      setMarqueeCurrent(null);
+    }
   };
 
   // Double Click finishes active wall chain
@@ -2196,9 +2481,13 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
   };
 
-  // Right click cancels active wall or measurement
+  // Right click cancels active wall or measurement (or ignores if used for panning)
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    if (didPanWithRightClickRef.current) {
+      didPanWithRightClickRef.current = false;
+      return;
+    }
     if (activeDrawingNode) {
       setActiveDrawingNode(null);
       soundEngine.playPencilClick();
@@ -2208,6 +2497,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
     if (calibratePointA) {
       setCalibratePointA(null);
+    }
+    if (isMarqueeDragging) {
+      setIsMarqueeDragging(false);
+      setMarqueeStart(null);
+      setMarqueeCurrent(null);
     }
   };
 
@@ -2219,6 +2513,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (isDraggingCanvas || isSpacePressed || activeTool === 'pan') {
       return isDraggingCanvas ? 'cursor-grabbing' : 'cursor-grab';
     }
+    if (isMarqueeDragging) {
+      return 'cursor-crosshair';
+    }
     if (activeTool === 'wall' || activeTool === 'measure' || activeTool === 'calibrate') {
       return 'cursor-crosshair';
     }
@@ -2228,7 +2525,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (activeTool === 'erase') {
       return 'cursor-no-drop';
     }
-    if (hoveredOpening || hoveredNode || hoveredWall || hoveredRoomId) {
+    if (hoveredNode) {
+      return 'cursor-move';
+    }
+    if (hoveredOpening || hoveredWall || hoveredRoomId) {
       return 'cursor-pointer';
     }
     return 'cursor-default';
@@ -2362,18 +2662,20 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
               : activeTool === 'measure'
               ? 'Click two points to measure distance'
               : activeTool === 'select'
-              ? 'Click to select element or drag corner node'
+              ? 'Click element · Drag empty space for Box Select · Type numbers to set length'
               : activeTool === 'erase'
               ? 'Click wall, opening, or node to delete'
               : 'Pan canvas'}
           </div>
         </div>
 
-        {/* Quick hint for Spacebar & Shift */}
+        {/* Quick hint for Spacebar & Shift & Pan */}
         <div className="hidden lg:flex items-center gap-1 text-[11px] text-slate-400 bg-white/70 backdrop-blur-xs px-2.5 py-1 rounded-md border border-slate-200/50 font-sans">
-          <span>Space+Drag to Pan</span>
+          <span>Middle/Right/Space+Drag to Pan</span>
           <span>·</span>
-          <span>Shift to Clamp 45°/90°</span>
+          <span>Shift to Clamp</span>
+          <span>·</span>
+          <span>Type numbers to set length</span>
         </div>
       </div>
     </div>
@@ -2391,3 +2693,62 @@ function distanceToSegment(p: Point, a: Point, b: Point): number {
     y: a.y + t * (b.y - a.y),
   });
 }
+
+// Helper: Checks if segment AB intersects axis-aligned bounding box [minX, maxX, minY, maxY]
+function doesSegmentIntersectBox(
+  p1: Point,
+  p2: Point,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number
+): boolean {
+  // 1. Either endpoint inside
+  if (p1.x >= minX && p1.x <= maxX && p1.y >= minY && p1.y <= maxY) return true;
+  if (p2.x >= minX && p2.x <= maxX && p2.y >= minY && p2.y <= maxY) return true;
+
+  // 2. Both endpoints on same outer side -> cannot intersect
+  if (p1.x < minX && p2.x < minX) return false;
+  if (p1.x > maxX && p2.x > maxX) return false;
+  if (p1.y < minY && p2.y < minY) return false;
+  if (p1.y > maxY && p2.y > maxY) return false;
+
+  // 3. Line-segment intersection with each of the 4 box edges
+  const linesIntersect = (a: Point, b: Point, c: Point, d: Point) => {
+    const ccw = (p: Point, q: Point, r: Point) =>
+      (r.y - p.y) * (q.x - p.x) > (q.y - p.y) * (r.x - p.x);
+    return ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+  };
+
+  const topLeft = { x: minX, y: minY };
+  const topRight = { x: maxX, y: minY };
+  const bottomLeft = { x: minX, y: maxY };
+  const bottomRight = { x: maxX, y: maxY };
+
+  return (
+    linesIntersect(p1, p2, topLeft, topRight) ||
+    linesIntersect(p1, p2, topRight, bottomRight) ||
+    linesIntersect(p1, p2, bottomRight, bottomLeft) ||
+    linesIntersect(p1, p2, bottomLeft, topLeft)
+  );
+}
+
+// Helper: Checks if two axis-aligned bounding boxes overlap
+function doBoxesOverlap(
+  b1MinX: number,
+  b1MaxX: number,
+  b1MinY: number,
+  b1MaxY: number,
+  b2MinX: number,
+  b2MaxX: number,
+  b2MinY: number,
+  b2MaxY: number
+): boolean {
+  return (
+    b1MinX <= b2MaxX &&
+    b1MaxX >= b2MinX &&
+    b1MinY <= b2MaxY &&
+    b1MaxY >= b2MinY
+  );
+}
+

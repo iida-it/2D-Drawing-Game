@@ -185,6 +185,9 @@ export default function App() {
       const newWalls = [...walls, newWall];
       setNodes(newNodes);
       setWalls(newWalls);
+      setSelectedWallId(newWall.id);
+      setSelectedOpeningId(null);
+      setSelectedRoomId(null);
       pushHistory(newNodes, newWalls, openings);
     },
     [nodes, walls, openings, settings.wallThicknessMeters, pushHistory]
@@ -467,41 +470,103 @@ export default function App() {
         return;
       }
 
-      // Hotkeys
-      if (e.key === 'v' || e.key === 'V') setActiveTool('select');
-      if (e.key === 'w' || e.key === 'W') setActiveTool('wall');
-      if (e.key === 'd' || e.key === 'D') {
-        setActiveTool('door');
-        setToastNotification('🚪 Single Door (片開き戸): Hover over any wall to snap.');
-      }
-      if (e.key === 'b' || e.key === 'B') {
-        setActiveTool('double-door');
-        setToastNotification('🚪 Double Door (両開き戸): Hover over any wall to snap dual swinging doors.');
-      }
-      if (e.key === 'l' || e.key === 'L') {
-        setActiveTool('sliding-door');
-        setToastNotification('🪟 Sliding Door (引違い戸): Hover over any wall to snap Japanese sliding door.');
-      }
-      if (e.key === 'n' || e.key === 'N') {
-        setActiveTool('window');
-        setToastNotification('🪟 Window (引違い窓): Hover over any wall to snap sash window.');
-      }
-      if (e.key === 'm' || e.key === 'M') setActiveTool('measure');
-      if (e.key === 'c' || e.key === 'C') {
-        setActiveTool('calibrate');
-        setToastNotification(
-          '📐 Calibration Tool: Click 2 points on blueprint to calibrate scale, or use presets.'
-        );
-      }
-      if (e.key === 'e' || e.key === 'E') setActiveTool('erase');
+      // Single-Key Tool Shortcuts (unless Ctrl, Meta, or Alt is pressed)
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        // V: Select Tool
+        if (e.key === 'v' || e.key === 'V') {
+          setActiveTool('select');
+        }
 
-      // Flip Door Swing hotkey (F)
-      if (e.key === 'f' || e.key === 'F') {
-        if (selectedOpeningId) {
-          const targetOp = openings.find((o) => o.id === selectedOpeningId);
-          if (targetOp && targetOp.type === 'door') {
-            handleUpdateOpening(selectedOpeningId, { swingFlip: !targetOp.swingFlip });
-            setToastNotification('Door swing flipped.');
+        // P or L: Draw Wall / Pen Tool
+        if (e.key === 'p' || e.key === 'P' || e.key === 'l' || e.key === 'L') {
+          setActiveTool('wall');
+          setToastNotification('✏️ Wall Drafting Tool (壁作成): Click to draft walls.');
+        }
+
+        // D: Single Door
+        if (e.key === 'd' || e.key === 'D') {
+          setActiveTool('door');
+          setToastNotification('🚪 Single Door (片開き戸): Hover over any wall to snap.');
+        }
+
+        // B: Double Door
+        if (e.key === 'b' || e.key === 'B') {
+          setActiveTool('double-door');
+          setToastNotification('🚪 Double Door (両開き戸): Hover over any wall to snap dual swinging doors.');
+        }
+
+        // S: Sliding Door (when Shift is not held)
+        if (!e.shiftKey && (e.key === 's' || e.key === 'S')) {
+          setActiveTool('sliding-door');
+          setToastNotification('🪟 Sliding Door (引違い戸): Hover over any wall to snap Japanese sliding door.');
+        }
+
+        // W: Window
+        if (e.key === 'w' || e.key === 'W') {
+          setActiveTool('window');
+          setToastNotification('🪟 Window (引違い窓): Hover over any wall to snap sash window.');
+        }
+
+        // M: Measure Tool (Tape Measure)
+        if (e.key === 'm' || e.key === 'M') {
+          setActiveTool('measure');
+          setToastNotification('📏 Tape Measure (寸法計測): Click two points to measure distance.');
+        }
+
+        // C: Calibrate Scale Tool
+        if (e.key === 'c' || e.key === 'C') {
+          setActiveTool('calibrate');
+          setToastNotification(
+            '📐 Calibration Tool: Click 2 points on blueprint to calibrate scale, or use presets.'
+          );
+        }
+
+        // E: Erase Tool
+        if (e.key === 'e' || e.key === 'E') {
+          setActiveTool('erase');
+          setToastNotification('🧹 Erase Tool (消去): Click wall, opening, or node to delete.');
+        }
+
+        // H: Pan Tool
+        if (e.key === 'h' || e.key === 'H') {
+          setActiveTool('pan');
+        }
+
+        // Toggle Grid Snapping (Shift+S or X)
+        if ((e.shiftKey && (e.key === 's' || e.key === 'S')) || e.key === 'x' || e.key === 'X') {
+          setSettings((prev) => {
+            const nextSnap = !prev.snapToGrid;
+            setToastNotification(`Grid Snap: ${nextSnap ? 'ON (10cm)' : 'OFF'}`);
+            return { ...prev, snapToGrid: nextSnap };
+          });
+        }
+
+        // Toggle Ortho Snapping (O)
+        if (e.key === 'o' || e.key === 'O') {
+          setSettings((prev) => {
+            const nextOrtho = !prev.orthoSnapping;
+            setToastNotification(`Ortho Snapping (45°/90°): ${nextOrtho ? 'ON' : 'OFF'}`);
+            return { ...prev, orthoSnapping: nextOrtho };
+          });
+        }
+
+        // Toggle Ghost Blueprint Reference (G)
+        if (e.key === 'g' || e.key === 'G') {
+          setSettings((prev) => {
+            const nextGhost = !prev.ghostVisible;
+            setToastNotification(`Blueprint Reference Layer: ${nextGhost ? 'VISIBLE' : 'HIDDEN'}`);
+            return { ...prev, ghostVisible: nextGhost };
+          });
+        }
+
+        // Flip Door Swing hotkey (F)
+        if (e.key === 'f' || e.key === 'F') {
+          if (selectedOpeningId) {
+            const targetOp = openings.find((o) => o.id === selectedOpeningId);
+            if (targetOp && (targetOp.type === 'door' || targetOp.type === 'double-door')) {
+              handleUpdateOpening(selectedOpeningId, { swingFlip: !targetOp.swingFlip });
+              setToastNotification('Door swing flipped.');
+            }
           }
         }
       }
@@ -513,7 +578,7 @@ export default function App() {
         }
       }
 
-      // Toggles
+      // View Mode Toggle (Tab or 3)
       if (e.key === 'Tab' || e.key === '3') {
         e.preventDefault();
         setViewMode((prev) => {
@@ -526,15 +591,7 @@ export default function App() {
           return next;
         });
       }
-      if (e.key === 's' || e.key === 'S') {
-        setSettings((prev) => ({ ...prev, snapToGrid: !prev.snapToGrid }));
-      }
-      if (e.key === 'o' || e.key === 'O') {
-        setSettings((prev) => ({ ...prev, orthoSnapping: !prev.orthoSnapping }));
-      }
-      if (e.key === 'g' || e.key === 'G') {
-        setSettings((prev) => ({ ...prev, ghostVisible: !prev.ghostVisible }));
-      }
+
       if (e.key === '?') {
         setIsShortcutsModalOpen(true);
       }
