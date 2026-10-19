@@ -13,9 +13,11 @@ import {
   HelpCircle,
   Layers,
   ChevronDown,
+  UploadCloud,
+  Box,
 } from 'lucide-react';
 import { BlueprintLevel, UploadedFloorPlan } from '../types';
-import { UploadCloud, Box } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface TopBarProps {
   levels: BlueprintLevel[];
@@ -69,22 +71,23 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleViewMode,
 }) => {
   const [levelDropdownOpen, setLevelDropdownOpen] = React.useState(false);
+  const { language, toggleLanguage, t } = useLanguage();
 
   return (
     <header className="h-14 bg-white/95 backdrop-blur-md border-b border-slate-200/90 px-4 flex items-center justify-between select-none z-30 shadow-xs">
       {/* Brand & Level Select */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center shadow-sm shadow-sky-200">
+          <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center shadow-sm shadow-sky-200 shrink-0">
             <Compass className="w-5 h-5 animate-pulse" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-900 tracking-tight text-sm">
-                Blueprint Studio 2D
+              <span className="font-semibold text-slate-900 tracking-tight text-sm whitespace-nowrap">
+                {t('brandTitle')}
               </span>
-              <span className="text-[11px] font-medium text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200/60">
-                {viewMode === '3d' ? '3D Walkthrough' : 'CAD Mode'}
+              <span className="text-[11px] font-medium text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200/60 hidden sm:inline whitespace-nowrap">
+                {viewMode === '3d' ? t('view3D') : t('cadMode')}
               </span>
             </div>
           </div>
@@ -97,13 +100,13 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={() => setLevelDropdownOpen(!levelDropdownOpen)}
             className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200/80 active:bg-slate-200 rounded-lg transition-colors border border-slate-200/60"
-            title="Switch blueprint challenge"
+            title={t('challengesTitle')}
           >
-            <Layers className="w-3.5 h-3.5 text-slate-500" />
-            <span className="truncate max-w-[160px] md:max-w-[220px]">
+            <Layers className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <span className="truncate max-w-[140px] md:max-w-[200px]">
               Ch. {currentLevel.levelNumber}: {currentLevel.title}
             </span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           </button>
 
           {levelDropdownOpen && (
@@ -114,7 +117,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               />
               <div className="absolute left-0 mt-1.5 w-72 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
                 <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                  Client Blueprint Challenges
+                  {t('challengesTitle')}
                 </div>
                 {levels.map((lvl) => {
                   const isCurrent = lvl.id === currentLevel.id;
@@ -157,7 +160,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     className="w-full text-left px-2.5 py-1.5 text-xs text-sky-700 hover:bg-sky-50 rounded-lg font-semibold flex items-center gap-2 transition-colors"
                   >
                     <UploadCloud className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Upload Custom Plan (PNG/PDF)</span>
+                    <span>{t('uploadCustomPlan')}</span>
                   </button>
                 </div>
               </div>
@@ -173,21 +176,21 @@ export const TopBar: React.FC<TopBarProps> = ({
               ? 'bg-sky-50 text-sky-800 border-sky-300 shadow-2xs'
               : 'bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-50 border-slate-200/80 shadow-2xs'
           }`}
-          title="Upload your own 2D floor plan image (PNG/JPG) or PDF page"
+          title={t('uploadCustomPlan')}
         >
-          <UploadCloud className="w-3.5 h-3.5 text-sky-600" />
-          <span className="hidden md:inline">
-            {customFloorPlan ? 'Plan Loaded' : 'Upload Plan'}
+          <UploadCloud className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+          <span className="hidden md:inline whitespace-nowrap">
+            {customFloorPlan ? t('planLoaded') : t('uploadPlan')}
           </span>
         </button>
 
         {customFloorPlan && onClearCustomFloorPlan && (
           <button
             onClick={onClearCustomFloorPlan}
-            className="text-[10px] text-slate-400 hover:text-rose-600 hover:underline px-1 py-0.5"
-            title="Reset to challenge floor plan"
+            className="text-[10px] text-slate-400 hover:text-rose-600 hover:underline px-1 py-0.5 whitespace-nowrap"
+            title={t('clearPlan')}
           >
-            Clear Plan
+            {t('clearPlan')}
           </button>
         )}
       </div>
@@ -198,27 +201,27 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 shadow-2xs">
           <button
             onClick={() => onToggleViewMode('2d')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               viewMode === '2d'
                 ? 'bg-white text-sky-800 shadow-2xs'
                 : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
             }`}
-            title="Switch to 2D Blueprint Drafting Mode (Tab)"
+            title={`${t('view2D')} (Tab)`}
           >
             <Compass className="w-3.5 h-3.5 text-sky-600" />
-            <span>2D Drafting</span>
+            <span>{t('view2D')}</span>
           </button>
           <button
             onClick={() => onToggleViewMode('3d')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               viewMode === '3d'
                 ? 'bg-sky-600 text-white shadow-2xs shadow-sky-200'
                 : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
             }`}
-            title="Switch to 3D Architectural Walkthrough Mode (Tab)"
+            title={`${t('view3D')} (Tab)`}
           >
             <Box className="w-3.5 h-3.5" />
-            <span>3D Model</span>
+            <span>{t('view3D')}</span>
             {hasClosedRooms && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             )}
@@ -232,7 +235,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               onClick={onUndo}
               disabled={!canUndo}
               className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-35 disabled:hover:bg-transparent transition-all"
-              title="Undo (Ctrl+Z)"
+              title={`${t('undo')} (Ctrl+Z)`}
             >
               <Undo2 className="w-4 h-4" />
             </button>
@@ -240,7 +243,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               onClick={onRedo}
               disabled={!canRedo}
               className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-35 disabled:hover:bg-transparent transition-all"
-              title="Redo (Ctrl+Y)"
+              title={`${t('redo')} (Ctrl+Y)`}
             >
               <Redo2 className="w-4 h-4" />
             </button>
@@ -250,7 +253,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={onZoomOut}
               className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
-              title="Zoom Out (-)"
+              title={`${t('zoomOut')} (-)`}
             >
               <ZoomOut className="w-4 h-4" />
             </button>
@@ -258,7 +261,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={onResetZoom}
               className="px-2 py-1 rounded-lg text-xs font-mono font-medium text-slate-700 hover:bg-white hover:text-slate-900 transition-all min-w-[50px] text-center"
-              title="Reset Zoom to 100%"
+              title={t('resetView')}
             >
               {Math.round(zoom * 100)}%
             </button>
@@ -266,7 +269,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={onZoomIn}
               className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
-              title="Zoom In (+)"
+              title={`${t('zoomIn')} (+)`}
             >
               <ZoomIn className="w-4 h-4" />
             </button>
@@ -274,7 +277,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={onResetZoom}
               className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white transition-all"
-              title="Reset View"
+              title={t('resetView')}
             >
               <Maximize2 className="w-4 h-4" />
             </button>
@@ -284,7 +287,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={onClear}
               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-all"
-              title="Clear all drafted walls"
+              title={t('clearAll')}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -292,8 +295,37 @@ export const TopBar: React.FC<TopBarProps> = ({
         )}
       </div>
 
-      {/* Right Actions: Sound, Help, Submit */}
+      {/* Right Actions: Compact Language Switcher, Sound, Help, Submit */}
       <div className="flex items-center gap-2">
+        {/* Compact High-Contrast Language Switcher (EN | 日本語) */}
+        <button
+          type="button"
+          onClick={toggleLanguage}
+          aria-label={t('languageToggleAria')}
+          title="Switch Language / 言語切替 (EN / 日本語)"
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-200/90 bg-white/95 hover:bg-white text-xs font-semibold text-slate-700 shadow-2xs hover:border-slate-300 transition-all select-none"
+        >
+          <span
+            className={
+              language === 'en'
+                ? 'text-sky-600 font-bold bg-sky-50 px-1.5 py-0.5 rounded'
+                : 'text-slate-400 font-medium'
+            }
+          >
+            EN
+          </span>
+          <span className="text-slate-300 font-light select-none text-[10px]">|</span>
+          <span
+            className={
+              language === 'ja'
+                ? 'text-sky-600 font-bold bg-sky-50 px-1.5 py-0.5 rounded'
+                : 'text-slate-400 font-medium'
+            }
+          >
+            日本語
+          </span>
+        </button>
+
         <button
           onClick={onToggleSound}
           className={`p-2 rounded-lg border transition-all ${
@@ -301,7 +333,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               ? 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50'
               : 'text-slate-400 bg-slate-100 border-slate-200'
           }`}
-          title={soundEnabled ? 'Mute Drafting Audio' : 'Unmute Drafting Audio'}
+          title={soundEnabled ? t('muteAudio') : t('unmuteAudio')}
         >
           {soundEnabled ? (
             <Volume2 className="w-4 h-4 text-sky-600" />
@@ -313,7 +345,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onOpenShortcuts}
           className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all"
-          title="Keyboard Shortcuts & CAD Controls (?)"
+          title={t('shortcuts')}
         >
           <HelpCircle className="w-4 h-4" />
         </button>
@@ -322,7 +354,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onSubmit}
           disabled={drawnWallsCount === 0}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all transform active:scale-95 ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all transform active:scale-95 whitespace-nowrap ${
             drawnWallsCount === 0
               ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
               : hasClosedRooms
@@ -332,11 +364,11 @@ export const TopBar: React.FC<TopBarProps> = ({
           title={
             drawnWallsCount === 0
               ? 'Draft at least one wall first'
-              : 'Submit blueprint drawing for client scoring'
+              : t('submitPlan')
           }
         >
           <Send className="w-3.5 h-3.5" />
-          <span>Submit Plan</span>
+          <span>{t('submitPlan')}</span>
         </button>
       </div>
     </header>

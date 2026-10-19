@@ -34,6 +34,7 @@ import { Node, Wall, WallOpening, ClosedRoom } from '../types';
 import { build3DArchitecturalModel } from '../utils/threeConversion';
 import { exportSceneToGLB } from '../utils/glbExport';
 import { GLBModelModal } from './GLBModelModal';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface Viewport3DProps {
   active: boolean; // When false, Three.js loop MUST stop to optimize INP & CPU
@@ -77,6 +78,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   scaleFactor,
   onSwitchTo2D,
 }) => {
+  const { t } = useLanguage();
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -952,10 +954,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         <button
           onClick={onSwitchTo2D}
           className="flex items-center gap-2 px-3.5 py-2 bg-white/95 hover:bg-white text-slate-800 rounded-xl shadow-md border border-slate-200/90 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 group"
-          title="Return to 2D Blueprint Drafting (Tab)"
+          title={`${t('backTo2D')} (Tab)`}
         >
           <Undo2 className="w-4 h-4 text-sky-600 transition-transform group-hover:-translate-x-0.5" />
-          <span>Back to 2D Blueprint</span>
+          <span>{t('backTo2D')}</span>
           <kbd className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[10px] font-mono border border-slate-200">
             Tab
           </kbd>
@@ -965,10 +967,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         <button
           onClick={() => setIsGLBModalOpen(true)}
           className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl shadow-md border border-sky-500/80 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 group shadow-sky-200"
-          title="Import binary 3D model (.glb / .gltf) with automatic ground alignment & transform gizmo"
+          title={t('import3DModel')}
         >
           <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
-          <span>Import 3D Model</span>
+          <span>{t('import3DModel')}</span>
           {importedModels.length > 0 && (
             <span className="bg-white/20 text-white px-1.5 py-0.2 rounded-full text-[10px] font-bold">
               {importedModels.length}
@@ -988,9 +990,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
         <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-slate-900/90 text-white rounded-xl shadow-md backdrop-blur-md text-xs font-medium border border-slate-700/60">
           <Box className="w-3.5 h-3.5 text-sky-400" />
-          <span>3D Architectural Walkthrough</span>
+          <span>{t('walkthrough3D')}</span>
           <span className="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded border border-sky-400/30">
-            {walls.length} Walls · {closedRooms.length} Rooms
+            {walls.length} {t('wallsCount')} · {closedRooms.length} {t('roomsCount')}
           </span>
         </div>
       </div>
@@ -1007,7 +1009,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 <span className="text-xs font-bold text-slate-800 block truncate max-w-[130px]">
                   {selectedModel.name}
                 </span>
-                <span className="text-[10px] text-sky-600 font-medium">Transform Gizmo Active</span>
+                <span className="text-[10px] text-sky-600 font-medium">{t('transformGizmoActive')}</span>
               </div>
             </div>
 
@@ -1038,10 +1040,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   ? 'bg-white text-sky-800 shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Move / Translate (Hotkey: W)"
+              title={`${t('move')} (W)`}
             >
               <Move className="w-3 h-3" />
-              <span>Move</span>
+              <span>{t('move')}</span>
             </button>
 
             <button
@@ -1051,10 +1053,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   ? 'bg-white text-sky-800 shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Rotate (Hotkey: E)"
+              title={`${t('rotate')} (E)`}
             >
               <RotateCw className="w-3 h-3" />
-              <span>Rotate</span>
+              <span>{t('rotate')}</span>
             </button>
 
             <button
@@ -1064,10 +1066,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   ? 'bg-white text-sky-800 shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Scale (Hotkey: R)"
+              title={`${t('scale')} (R)`}
             >
               <Maximize2 className="w-3 h-3" />
-              <span>Scale</span>
+              <span>{t('scale')}</span>
             </button>
           </div>
 
@@ -1083,7 +1085,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               title="Toggle 10cm grid & 15° angle snapping"
             >
               <Crosshair className="w-3 h-3" />
-              <span>Snap: {snapEnabled ? '10cm / 15°' : 'Free'}</span>
+              <span>{t('snap')}: {snapEnabled ? '10cm / 15°' : t('free')}</span>
             </button>
 
             <button
@@ -1123,7 +1125,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             title="Viewport Shading, Scene Helpers & Background Settings"
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>Display</span>
+            <span>{t('display')}</span>
             <ChevronDown
               className={`w-3 h-3 transition-transform duration-200 ${
                 isDisplayMenuOpen ? 'rotate-180' : ''
@@ -1142,10 +1144,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   </div>
                   <div>
                     <h3 className="font-bold text-slate-900 text-xs leading-none">
-                      Viewport Shading & Helpers
+                      {t('viewportShadingAndHelpers')}
                     </h3>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      3D Display Presets
+                      {t('displayPresetsSub')}
                     </span>
                   </div>
                 </div>
@@ -1161,7 +1163,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <div className="mb-3.5">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono">
-                    RENDER SHADING
+                    {t('renderShading')}
                   </span>
                   <span className="text-[10px] font-medium text-sky-700 capitalize">
                     {shadingMode}
@@ -1180,7 +1182,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                     title="Material: Restores original PBR/Texture materials (cached via WeakMap)"
                   >
                     <Palette className="w-3 h-3 text-sky-600" />
-                    <span>Material</span>
+                    <span>{t('shadingMaterial')}</span>
                   </button>
 
                   <button
@@ -1193,7 +1195,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                     title="Wireframe: Sets material.wireframe = true on all meshes"
                   >
                     <Grid className="w-3 h-3 text-indigo-600" />
-                    <span>Wireframe</span>
+                    <span>{t('shadingWireframe')}</span>
                   </button>
 
                   <button
@@ -1206,7 +1208,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                     title="Normals: Swaps mesh materials to THREE.MeshNormalMaterial"
                   >
                     <Sparkles className="w-3 h-3 text-emerald-600" />
-                    <span>Normals</span>
+                    <span>{t('shadingNormals')}</span>
                   </button>
                 </div>
 
@@ -1221,7 +1223,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                     title="X-Ray: Transparent blue blend material (opacity: 0.35, depthWrite: false)"
                   >
                     <Eye className="w-3 h-3 text-cyan-600" />
-                    <span>X-Ray</span>
+                    <span>{t('shadingXRay')}</span>
                   </button>
 
                   <button
@@ -1234,7 +1236,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                     title="Point Cloud: Renders scene vertices as THREE.Points"
                   >
                     <Crosshair className="w-3 h-3 text-amber-600" />
-                    <span>Point Cloud</span>
+                    <span>{t('shadingPointCloud')}</span>
                   </button>
                 </div>
 
@@ -1242,7 +1244,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 {shadingMode === 'points' && (
                   <div className="mt-2.5 p-2 bg-sky-50/70 border border-sky-200/80 rounded-xl animate-in fade-in duration-150">
                     <div className="flex items-center justify-between text-[11px] font-medium text-sky-900 mb-1">
-                      <span>Point Cloud Size:</span>
+                      <span>{t('pointCloudSize')}:</span>
                       <span className="font-mono font-bold">{pointCloudSize.toFixed(2)}</span>
                     </div>
                     <input
@@ -1266,14 +1268,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               {/* 2. SCENE HELPERS SECTION */}
               <div className="mb-3.5 border-t border-slate-200/80 pt-2.5">
                 <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono block mb-1.5">
-                  SCENE HELPERS
+                  {t('sceneHelpers')}
                 </span>
 
                 <div className="flex flex-col gap-1.5">
                   {/* Ground Grid Checkbox */}
                   <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-100/80 cursor-pointer transition-colors group">
                     <span className="text-[11px] font-medium text-slate-700 group-hover:text-slate-900">
-                      Ground Grid
+                      {t('groundGrid')}
                     </span>
                     <input
                       type="checkbox"
@@ -1286,7 +1288,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   {/* XYZ Axes Helper Checkbox */}
                   <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-100/80 cursor-pointer transition-colors group">
                     <span className="text-[11px] font-medium text-slate-700 group-hover:text-slate-900">
-                      XYZ Axes Helper
+                      {t('xyzAxesHelper')}
                     </span>
                     <input
                       type="checkbox"
@@ -1299,7 +1301,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   {/* Selection Bounds Checkbox */}
                   <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-100/80 cursor-pointer transition-colors group">
                     <span className="text-[11px] font-medium text-slate-700 group-hover:text-slate-900">
-                      Selection Bounds
+                      {t('selectionBounds')}
                     </span>
                     <input
                       type="checkbox"
@@ -1315,7 +1317,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <div className="border-t border-slate-200/80 pt-2.5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono">
-                    BACKGROUND COLOR
+                    {t('backgroundColor')}
                   </span>
                   <span className="text-[10px] font-mono font-medium text-slate-500 uppercase">
                     {currentBgColor}
@@ -1366,7 +1368,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           ) : (
             <>
               <Box className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Export .GLB</span>
+              <span className="hidden sm:inline">{t('exportGLB')}</span>
               <span className="sm:hidden">.GLB</span>
             </>
           )}
@@ -1378,13 +1380,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           title="Capture High-Res Architectural 3D Render"
         >
           <Download className="w-3.5 h-3.5 text-slate-600" />
-          <span className="hidden sm:inline">PNG</span>
+          <span className="hidden sm:inline">{t('screenshotPNG')}</span>
         </button>
 
         <button
           onClick={() => applyCameraPreset('iso')}
           className="p-2 bg-white/95 hover:bg-white text-slate-700 rounded-xl shadow-md border border-slate-200/90 transition-all hover:scale-[1.02] active:scale-95"
-          title="Reset Camera View"
+          title={`${t('resetCamera')} (R)`}
         >
           <RotateCcw className="w-4 h-4 text-slate-600" />
         </button>
@@ -1420,7 +1422,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           {/* Camera Presets */}
           <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/70">
             <span className="text-[11px] font-semibold text-slate-400 px-1.5 hidden md:inline">
-              Camera:
+              {t('camera')}:
             </span>
             <button
               onClick={() => applyCameraPreset('iso')}
@@ -1430,7 +1432,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Isometric
+              {t('isometric')}
             </button>
             <button
               onClick={() => applyCameraPreset('top')}
@@ -1440,7 +1442,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Top-Down
+              {t('topDown')}
             </button>
             <button
               onClick={() => applyCameraPreset('eye')}
@@ -1450,7 +1452,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Eye-Level
+              {t('eyeLevel')}
             </button>
             <button
               onClick={() => applyCameraPreset('front')}
@@ -1460,14 +1462,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Elevation
+              {t('elevation')}
             </button>
           </div>
 
           {/* Wall Height Adjustment */}
           <div className="flex items-center gap-2 bg-slate-100/80 px-2.5 py-1.5 rounded-xl border border-slate-200/70">
             <Building2 className="w-3.5 h-3.5 text-slate-500" />
-            <span className="text-[11px] font-semibold text-slate-600">Wall H:</span>
+            <span className="text-[11px] font-semibold text-slate-600">{t('wallHeight')}:</span>
             <input
               type="range"
               min="2.0"
@@ -1493,7 +1495,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             title="Toggle Cutaway Dollhouse View (see floor finishes clearly)"
           >
             <Layers className="w-3.5 h-3.5 text-amber-600" />
-            <span>Cutaway</span>
+            <span>{t('cutaway')}</span>
           </button>
 
           {/* Sun / Lighting Presets */}
@@ -1553,7 +1555,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             title="Auto-Rotate Architectural Showcase"
           >
             <RotateCcw className={`w-3.5 h-3.5 ${autoRotate ? 'animate-spin' : ''}`} />
-            <span>Orbit</span>
+            <span>{t('orbit')}</span>
           </button>
 
           {/* Quick Import 3D Model in Dock */}
@@ -1563,7 +1565,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             title="Import .glb / .gltf 3D model or architectural props"
           >
             <Plus className="w-3.5 h-3.5 text-sky-600" />
-            <span>Add Model</span>
+            <span>{t('addModel')}</span>
           </button>
         </div>
       </div>
