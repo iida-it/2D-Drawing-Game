@@ -11,13 +11,14 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
 
   const toolShortcuts = [
     { key: 'Tab / 3', desc: 'Toggle 2D Blueprint / 3D Walkthrough' },
+    { key: 'W / E / R', desc: '3D Gizmo: Move / Rotate / Scale' },
     { key: 'V', desc: 'Select & Move Tool' },
-    { key: 'W', desc: 'Draw Wall Tool' },
+    { key: 'W (in 2D)', desc: 'Draw Wall Tool' },
     { key: 'D', desc: 'Door Opening Tool (Snap to wall)' },
     { key: 'N', desc: 'Window Opening Tool (Snap to wall)' },
     { key: 'M', desc: 'Tape Measure Tool' },
     { key: 'C', desc: 'Calibrate Scale' },
-    { key: 'E', desc: 'Erase Wall / Opening' },
+    { key: 'E (in 2D)', desc: 'Erase Wall / Opening' },
     { key: 'F', desc: 'Flip Door Swing (Inside/Outside)' },
     { key: 'S', desc: 'Toggle 10cm Grid Snap' },
     { key: 'O', desc: 'Toggle Ortho Angle Clamping (0°/45°/90°)' },

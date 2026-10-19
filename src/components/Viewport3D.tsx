@@ -1,18 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
-  Compass,
   RotateCcw,
   Sun,
   Sunset,
   Moon,
   Layers,
-  Camera,
-  Maximize,
-  Eye,
-  Sliders,
   ChevronDown,
   ChevronUp,
   Download,
@@ -20,14 +16,20 @@ import {
   Undo2,
   Box,
   Loader2,
-  FileCode,
   Trash2,
-  Code2,
+  Move,
+  RotateCw,
+  Maximize2,
+  Plus,
+  Crosshair,
+  Check,
+  X,
+  Sliders,
 } from 'lucide-react';
 import { Node, Wall, WallOpening, ClosedRoom } from '../types';
 import { build3DArchitecturalModel } from '../utils/threeConversion';
 import { exportSceneToGLB } from '../utils/glbExport';
-import { ProceduralScriptModal } from './ProceduralScriptModal';
+import { GLBModelModal } from './GLBModelModal';
 
 interface Viewport3DProps {
   active: boolean; // When false, Three.js loop MUST stop to optimize INP & CPU
@@ -41,6 +43,15 @@ interface Viewport3DProps {
 
 type LightingPreset = 'noon' | 'sunset' | 'night';
 type CameraPreset = 'iso' | 'top' | 'eye' | 'front';
+type GizmoMode = 'translate' | 'rotate' | 'scale';
+
+interface LoadedModelRecord {
+  id: string;
+  name: string;
+  object: THREE.Object3D;
+  vertexCount?: number;
+  faceCount?: number;
+}
 
 export const Viewport3D: React.FC<Viewport3DProps> = ({
   active,
@@ -56,6 +67,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const transformControlsRef = useRef<TransformControls | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
   const currentModelGroupRef = useRef<THREE.Group | null>(null);
 
@@ -71,55 +83,128 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [controlsDockCollapsed, setControlsDockCollapsed] = useState<boolean>(false);
   const [activeCamPreset, setActiveCamPreset] = useState<CameraPreset>('iso');
   const [isExportingGLB, setIsExportingGLB] = useState<boolean>(false);
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [toastNotice, setToastNotice] = useState<string | null>(null);
 
-  // Procedural Models Pipeline State
-  const proceduralGroupRef = useRef<THREE.Group | null>(null);
-  const [proceduralModels, setProceduralModels] = useState<
-    Array<{ id: string; name: string; vertexCount?: number }>
-  >([]);
-  const [isProceduralModalOpen, setIsProceduralModalOpen] = useState<boolean>(false);
+  // Native GLB/GLTF Models State
+  const modelsGroupRef = useRef<THREE.Group | null>(null);
+  const [importedModels, setImportedModels] = useState<LoadedModelRecord[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [isGLBModalOpen, setIsGLBModalOpen] = useState<boolean>(false);
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
+  const [gizmoSpace, setGizmoSpace] = useState<'world' | 'local'>('world');
+  const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
 
-  // Handle addition of procedural 3D model generated from .ts script
-  const handleProceduralModelGenerated = (
-    object: THREE.Object3D,
-    scriptName: string,
-    stats?: { totalVertices: number; totalFaces: number }
-  ) => {
-    if (!sceneRef.current) return;
+  // Pointer drag vs click detection
+  const pointerDownPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isGizmoDraggingRef = useRef<boolean>(false);
 
-    // Ground the object so it sits flush on the architectural floor (Y >= 0)
-    const box = new THREE.Box3().setFromObject(object);
-    if (box.min.y < 0) {
-      object.position.y += Math.abs(box.min.y);
-    }
+  // Helper to show transient banner notice
+  const showNotification = useCallback((message: string) => {
+    setToastNotice(message);
+    setTimeout(() => setToastNotice(null), 3800);
+  }, []);
 
-    object.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
+  // Update TransformControls mode / space / snap
+  useEffect(() => {
+    const tc = transformControlsRef.current;
+    if (!tc) return;
 
-    if (proceduralGroupRef.current) {
-      proceduralGroupRef.current.add(object);
+    tc.setMode(gizmoMode);
+    tc.setSpace(gizmoSpace);
+
+    if (snapEnabled) {
+      tc.setTranslationSnap(0.1); // 10cm grid snap
+      tc.setRotationSnap(THREE.MathUtils.degToRad(15)); // 15 deg snap
+      tc.setScaleSnap(0.1);
     } else {
-      sceneRef.current.add(object);
+      tc.setTranslationSnap(null);
+      tc.setRotationSnap(null);
+      tc.setScaleSnap(null);
+    }
+  }, [gizmoMode, gizmoSpace, snapEnabled]);
+
+  // Select an imported 3D model and attach Gizmo
+  const selectModel = useCallback((modelId: string | null) => {
+    setSelectedModelId(modelId);
+    const tc = transformControlsRef.current;
+    if (!tc) return;
+
+    if (!modelId) {
+      tc.detach();
+      return;
     }
 
-    setProceduralModels((prev) => [
-      ...prev,
-      { id: object.uuid, name: scriptName, vertexCount: stats?.totalVertices },
-    ]);
+    const item = importedModels.find((m) => m.id === modelId);
+    if (item && item.object) {
+      tc.attach(item.object);
+    } else {
+      tc.detach();
+    }
+  }, [importedModels]);
 
-    setIsProceduralModalOpen(false);
+  // Delete an imported model
+  const handleDeleteModel = (modelId: string) => {
+    const item = importedModels.find((m) => m.id === modelId);
+    if (!item) return;
+
+    if (selectedModelId === modelId) {
+      transformControlsRef.current?.detach();
+      setSelectedModelId(null);
+    }
+
+    if (modelsGroupRef.current && item.object) {
+      modelsGroupRef.current.remove(item.object);
+      item.object.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.geometry?.dispose();
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach((m) => m.dispose());
+          } else {
+            mesh.material?.dispose();
+          }
+        }
+      });
+    }
+
+    setImportedModels((prev) => prev.filter((m) => m.id !== modelId));
+    showNotification(`Removed "${item.name}".`);
   };
 
-  const handleClearProceduralModels = () => {
-    if (proceduralGroupRef.current) {
-      proceduralGroupRef.current.clear();
-      setProceduralModels([]);
+  // Clear all imported models
+  const handleClearAllModels = () => {
+    transformControlsRef.current?.detach();
+    setSelectedModelId(null);
+
+    if (modelsGroupRef.current) {
+      modelsGroupRef.current.clear();
+      setImportedModels([]);
+      showNotification('Cleared all imported 3D models.');
     }
+  };
+
+  // Handle addition of normalized .GLB/.GLTF model into active 3D Viewport scene
+  const handleModelLoaded = (model: THREE.Group, name: string) => {
+    if (!sceneRef.current || !modelsGroupRef.current) return;
+
+    // Add to imported models group
+    modelsGroupRef.current.add(model);
+
+    // Record model
+    const newRecord: LoadedModelRecord = {
+      id: model.uuid,
+      name,
+      object: model,
+    };
+
+    setImportedModels((prev) => [...prev, newRecord]);
+
+    // Attach transform gizmo immediately so user can place it
+    transformControlsRef.current?.attach(model);
+    setSelectedModelId(model.uuid);
+
+    showNotification(`Added "${name}" with 3D Transform Gizmo active.`);
+    setIsGLBModalOpen(false);
   };
 
   // Rebuild 3D Model when blueprint geometry changes or wall height changes
@@ -258,16 +343,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const handleExportGLB = async () => {
     if (!sceneRef.current || isExportingGLB) return;
     setIsExportingGLB(true);
-    setExportNotice('Merging geometries & exporting optimized binary .GLB...');
+    showNotification('Merging geometries & exporting optimized binary .GLB...');
     try {
       const filename = `ArchitecturalPlan_3D_${Date.now()}.glb`;
       await exportSceneToGLB(sceneRef.current, filename);
-      setExportNotice('GLB file downloaded successfully!');
-      setTimeout(() => setExportNotice(null), 3500);
+      showNotification('GLB file downloaded successfully!');
     } catch (err) {
       console.error('Failed to export GLB model:', err);
-      setExportNotice('GLB export failed. See browser console.');
-      setTimeout(() => setExportNotice(null), 3500);
+      showNotification('GLB export failed. See browser console.');
     } finally {
       setIsExportingGLB(false);
     }
@@ -300,11 +383,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.fog = new THREE.Fog(0xf1f5f9, 20, 60);
     sceneRef.current = scene;
 
-    // Procedural Models Root Group
-    const procGroup = new THREE.Group();
-    procGroup.name = 'ProceduralModelsRoot';
-    scene.add(procGroup);
-    proceduralGroupRef.current = procGroup;
+    // Imported GLB Models Root Group
+    const modelsGroup = new THREE.Group();
+    modelsGroup.name = 'ImportedGLBModelsRoot';
+    scene.add(modelsGroup);
+    modelsGroupRef.current = modelsGroup;
 
     // Studio Environment reflection map
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -331,6 +414,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     controls.target.set(0, 1.2, 0);
     controlsRef.current = controls;
 
+    // TransformControls Gizmo for 3D imported model positioning
+    const transformControls = new TransformControls(camera, renderer.domElement);
+    transformControls.size = 0.85;
+    transformControls.setTranslationSnap(0.1);
+    transformControls.setRotationSnap(THREE.MathUtils.degToRad(15));
+    scene.add(transformControls.getHelper());
+    transformControlsRef.current = transformControls;
+
+    // Disable OrbitControls while actively manipulating Gizmo handles
+    transformControls.addEventListener('dragging-changed', (event: any) => {
+      controls.enabled = !event.value;
+      isGizmoDraggingRef.current = event.value;
+    });
+
     // 3-Point Studio Lighting Rig
     const dirLight = new THREE.DirectionalLight(0xfff8ee, 1.6);
     dirLight.position.set(12, 18, 10);
@@ -352,6 +449,59 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.add(hemiLight);
     hemiLightRef.current = hemiLight;
 
+    // Click in 3D scene to select an imported model or deselect
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    const handlePointerDown = (e: MouseEvent) => {
+      pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const handlePointerUp = (e: MouseEvent) => {
+      if (isGizmoDraggingRef.current) return;
+
+      const dx = Math.abs(e.clientX - pointerDownPosRef.current.x);
+      const dy = Math.abs(e.clientY - pointerDownPosRef.current.y);
+      if (dx > 5 || dy > 5) {
+        // Was a camera orbit drag, not a selection click
+        return;
+      }
+
+      // Check if user clicked on TransformControls gizmo itself
+      if (transformControls.axis) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      if (modelsGroupRef.current && modelsGroupRef.current.children.length > 0) {
+        const intersects = raycaster.intersectObjects(modelsGroupRef.current.children, true);
+        if (intersects.length > 0) {
+          // Find root model under modelsGroup
+          let topObj: THREE.Object3D | null = intersects[0].object;
+          while (topObj && topObj.parent && topObj.parent !== modelsGroupRef.current) {
+            topObj = topObj.parent;
+          }
+
+          if (topObj) {
+            transformControls.attach(topObj);
+            setSelectedModelId(topObj.uuid);
+            return;
+          }
+        }
+      }
+
+      // If clicked empty area (not a model), detach gizmo
+      transformControls.detach();
+      setSelectedModelId(null);
+    };
+
+    const dom = renderer.domElement;
+    dom.addEventListener('mousedown', handlePointerDown);
+    dom.addEventListener('mouseup', handlePointerUp);
+
     // Window Resize Observer
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -366,11 +516,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     resizeObserver.observe(container);
 
     return () => {
+      dom.removeEventListener('mousedown', handlePointerDown);
+      dom.removeEventListener('mouseup', handlePointerUp);
       resizeObserver.disconnect();
       if (animFrameIdRef.current) {
         cancelAnimationFrame(animFrameIdRef.current);
         animFrameIdRef.current = null;
       }
+      transformControls.dispose();
       controls.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
@@ -385,11 +538,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     rebuild3DModel();
   }, [rebuild3DModel]);
 
-  // CRITICAL REQUIREMENT 4:
-  // "Implement a clean 2D/3D toggle mechanism that stops the Three.js render loop when in 2D mode to optimize Lighthouse INP and CPU performance."
+  // Clean 2D/3D toggle mechanism that stops the Three.js render loop when in 2D mode
   useEffect(() => {
     if (!active) {
-      // STOP render loop immediately when not in 3D mode!
+      // STOP render loop immediately when not in 3D mode to optimize Lighthouse INP and CPU performance
       if (animFrameIdRef.current !== null) {
         cancelAnimationFrame(animFrameIdRef.current);
         animFrameIdRef.current = null;
@@ -398,13 +550,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
 
     // When active is true: start the render loop
-    let lastTime = performance.now();
-
-    const animate = (time: number) => {
+    const animate = () => {
       animFrameIdRef.current = requestAnimationFrame(animate);
-
-      const delta = (time - lastTime) / 1000;
-      lastTime = time;
 
       if (controlsRef.current) {
         if (autoRotate) {
@@ -431,6 +578,31 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
   }, [active, autoRotate]);
 
+  // Keyboard shortcut listener for Gizmo modes
+  useEffect(() => {
+    if (!active) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === 'w' || e.key === 'W') {
+        setGizmoMode('translate');
+      } else if (e.key === 'e' || e.key === 'E') {
+        setGizmoMode('rotate');
+      } else if (e.key === 'r' || e.key === 'R') {
+        setGizmoMode('scale');
+      } else if (e.key === 'Escape') {
+        transformControlsRef.current?.detach();
+        setSelectedModelId(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [active]);
+
+  const selectedModel = importedModels.find((m) => m.id === selectedModelId);
+
   return (
     <div className={`relative w-full h-full select-none ${active ? 'block' : 'hidden'}`}>
       {/* 3D WebGL Canvas Container */}
@@ -450,26 +622,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </kbd>
         </button>
 
-        {/* Procedural Script Upload & Execution Button */}
+        {/* Import .GLB / .GLTF 3D Model Button */}
         <button
-          onClick={() => setIsProceduralModalOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-white/95 hover:bg-white text-slate-800 rounded-xl shadow-md border border-slate-200/90 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 group"
-          title="Upload or write procedural Three.js TypeScript (.ts) files in isolated sandbox"
+          onClick={() => setIsGLBModalOpen(true)}
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl shadow-md border border-sky-500/80 text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 group shadow-sky-200"
+          title="Import binary 3D model (.glb / .gltf) with automatic ground alignment & transform gizmo"
         >
-          <FileCode className="w-4 h-4 text-sky-600 transition-transform group-hover:scale-110" />
-          <span>Procedural .TS</span>
-          {proceduralModels.length > 0 && (
-            <span className="bg-sky-100 text-sky-800 px-1.5 py-0.2 rounded-full text-[10px] font-bold">
-              {proceduralModels.length}
+          <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
+          <span>Import 3D Model</span>
+          {importedModels.length > 0 && (
+            <span className="bg-white/20 text-white px-1.5 py-0.2 rounded-full text-[10px] font-bold">
+              {importedModels.length}
             </span>
           )}
         </button>
 
-        {proceduralModels.length > 0 && (
+        {importedModels.length > 0 && (
           <button
-            onClick={handleClearProceduralModels}
+            onClick={handleClearAllModels}
             className="p-2 bg-white/95 hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-xl shadow-md border border-slate-200/90 text-xs font-semibold transition-all"
-            title="Clear procedural 3D models"
+            title="Clear all imported 3D models"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -484,15 +656,117 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         </div>
       </div>
 
-      {/* Export Notice Banner */}
-      {exportNotice && (
+      {/* Active Transform Gizmo Floating Control Card (when a model is selected) */}
+      {selectedModel && (
+        <div className="absolute top-16 left-4 z-20 bg-white/95 backdrop-blur-md p-2.5 rounded-2xl shadow-xl border border-sky-300/80 flex flex-col gap-2 min-w-[240px] animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-sky-100 text-sky-700">
+                <Box className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-slate-800 block truncate max-w-[130px]">
+                  {selectedModel.name}
+                </span>
+                <span className="text-[10px] text-sky-600 font-medium">Transform Gizmo Active</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleDeleteModel(selectedModel.id)}
+                className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                title="Delete this 3D model"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => selectModel(null)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                title="Deselect model (Esc)"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Gizmo Mode Switcher: Translate (W), Rotate (E), Scale (R) */}
+          <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setGizmoMode('translate')}
+              className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+                gizmoMode === 'translate'
+                  ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Move / Translate (Hotkey: W)"
+            >
+              <Move className="w-3 h-3" />
+              <span>Move</span>
+            </button>
+
+            <button
+              onClick={() => setGizmoMode('rotate')}
+              className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+                gizmoMode === 'rotate'
+                  ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Rotate (Hotkey: E)"
+            >
+              <RotateCw className="w-3 h-3" />
+              <span>Rotate</span>
+            </button>
+
+            <button
+              onClick={() => setGizmoMode('scale')}
+              className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+                gizmoMode === 'scale'
+                  ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Scale (Hotkey: R)"
+            >
+              <Maximize2 className="w-3 h-3" />
+              <span>Scale</span>
+            </button>
+          </div>
+
+          {/* Snapping and Coordinate Space */}
+          <div className="flex items-center justify-between text-[11px] pt-1">
+            <button
+              onClick={() => setSnapEnabled(!snapEnabled)}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border font-medium transition-all ${
+                snapEnabled
+                  ? 'bg-sky-50 text-sky-800 border-sky-300'
+                  : 'bg-slate-50 text-slate-500 border-slate-200'
+              }`}
+              title="Toggle 10cm grid & 15° angle snapping"
+            >
+              <Crosshair className="w-3 h-3" />
+              <span>Snap: {snapEnabled ? '10cm / 15°' : 'Free'}</span>
+            </button>
+
+            <button
+              onClick={() => setGizmoSpace(gizmoSpace === 'world' ? 'local' : 'world')}
+              className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 font-mono text-[10px] transition-colors"
+              title="Toggle World vs Local coordinate space"
+            >
+              {gizmoSpace.toUpperCase()}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notice Banner */}
+      {toastNotice && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 text-white backdrop-blur-md px-4 py-2 rounded-xl shadow-xl text-xs font-medium border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
           {isExportingGLB ? (
             <Loader2 className="w-4 h-4 text-sky-400 animate-spin" />
           ) : (
             <Box className="w-4 h-4 text-emerald-400" />
           )}
-          <span>{exportNotice}</span>
+          <span>{toastNotice}</span>
         </div>
       )}
 
@@ -539,7 +813,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       {/* Unified Ergonomic Bottom Control Dock (Three.js Skill Directive 5: Zero Viewport Occlusion) */}
       <div
-        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center transition-all duration-300 max-w-[min(940px,95vw)] w-full px-2 ${
+        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center transition-all duration-300 max-w-[min(960px,96vw)] w-full px-2 ${
           controlsDockCollapsed ? 'translate-y-[calc(100%-32px)]' : 'translate-y-0'
         }`}
       >
@@ -597,7 +871,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Eye-Level (1.6m)
+              Eye-Level
             </button>
             <button
               onClick={() => applyCameraPreset('front')}
@@ -640,7 +914,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             title="Toggle Cutaway Dollhouse View (see floor finishes clearly)"
           >
             <Layers className="w-3.5 h-3.5 text-amber-600" />
-            <span>Dollhouse Cutaway</span>
+            <span>Cutaway</span>
           </button>
 
           {/* Sun / Lighting Presets */}
@@ -694,42 +968,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             <span>Orbit</span>
           </button>
 
-          {/* Quick GLB Export in Dock */}
+          {/* Quick Import 3D Model in Dock */}
           <button
-            onClick={handleExportGLB}
-            disabled={isExportingGLB}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100/80 hover:bg-white text-slate-700 hover:text-slate-900 rounded-xl border border-slate-200/70 font-semibold transition-all shadow-2xs"
-            title="Download optimized binary .GLB 3D scene"
+            onClick={() => setIsGLBModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 text-sky-800 hover:bg-sky-100 rounded-xl border border-sky-200 font-semibold transition-all shadow-2xs"
+            title="Import .glb / .gltf 3D model or architectural props"
           >
-            {isExportingGLB ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
-            ) : (
-              <Download className="w-3.5 h-3.5 text-sky-600" />
-            )}
-            <span>Export GLB</span>
-          </button>
-
-          {/* Quick Procedural Script in Dock */}
-          <button
-            onClick={() => setIsProceduralModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100/80 hover:bg-white text-slate-700 hover:text-slate-900 rounded-xl border border-slate-200/70 font-semibold transition-all shadow-2xs"
-            title="Upload or write procedural Three.js TypeScript script"
-          >
-            <Code2 className="w-3.5 h-3.5 text-sky-600" />
-            <span>Procedural .TS</span>
+            <Plus className="w-3.5 h-3.5 text-sky-600" />
+            <span>Add Model</span>
           </button>
         </div>
       </div>
 
-      {/* Procedural TypeScript File Upload & Execution Modal */}
-      <ProceduralScriptModal
-        isOpen={isProceduralModalOpen}
-        onClose={() => setIsProceduralModalOpen(false)}
-        onModelGenerated={handleProceduralModelGenerated}
-        onShowToast={(msg) => {
-          setExportNotice(msg);
-          setTimeout(() => setExportNotice(null), 4000);
-        }}
+      {/* Native GLB/GLTF Model Import Modal */}
+      <GLBModelModal
+        isOpen={isGLBModalOpen}
+        onClose={() => setIsGLBModalOpen(false)}
+        onModelLoaded={handleModelLoaded}
+        onShowToast={showNotification}
       />
     </div>
   );
