@@ -33,8 +33,11 @@ import {
 import { Node, Wall, WallOpening, ClosedRoom } from '../types';
 import { build3DArchitecturalModel } from '../utils/threeConversion';
 import { exportSceneToGLB } from '../utils/glbExport';
-import { GLBModelModal } from './GLBModelModal';
 import { useLanguage } from '../i18n/LanguageContext';
+
+const GLBModelModal = React.lazy(() =>
+  import('./GLBModelModal').then((m) => ({ default: m.GLBModelModal }))
+);
 
 interface Viewport3DProps {
   active: boolean; // When false, Three.js loop MUST stop to optimize INP & CPU
@@ -1571,12 +1574,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       </div>
 
       {/* Native GLB/GLTF Model Import Modal */}
-      <GLBModelModal
-        isOpen={isGLBModalOpen}
-        onClose={() => setIsGLBModalOpen(false)}
-        onModelLoaded={handleModelLoaded}
-        onShowToast={showNotification}
-      />
+      <React.Suspense fallback={null}>
+        {isGLBModalOpen && (
+          <GLBModelModal
+            isOpen={isGLBModalOpen}
+            onClose={() => setIsGLBModalOpen(false)}
+            onModelLoaded={handleModelLoaded}
+            onShowToast={showNotification}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 };

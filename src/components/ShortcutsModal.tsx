@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Keyboard, Mouse } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface ShortcutsModalProps {
   isOpen: boolean;
@@ -7,33 +8,34 @@ interface ShortcutsModalProps {
 }
 
 export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose }) => {
+  const { t } = useLanguage();
   if (!isOpen) return null;
 
   const toolShortcuts = [
-    { key: 'Tab / 3', desc: 'Toggle 2D Blueprint / 3D Walkthrough' },
-    { key: 'W / E / R', desc: '3D Gizmo: Move / Rotate / Scale' },
-    { key: 'V', desc: 'Select & Move Tool' },
-    { key: 'W (in 2D)', desc: 'Draw Wall Tool' },
-    { key: 'D', desc: 'Door Opening Tool (Snap to wall)' },
-    { key: 'N', desc: 'Window Opening Tool (Snap to wall)' },
-    { key: 'M', desc: 'Tape Measure Tool' },
-    { key: 'C', desc: 'Calibrate Scale' },
-    { key: 'E (in 2D)', desc: 'Erase Wall / Opening' },
-    { key: 'F', desc: 'Flip Door Swing (Inside/Outside)' },
-    { key: 'S', desc: 'Toggle 10cm Grid Snap' },
-    { key: 'O', desc: 'Toggle Ortho Angle Clamping (0°/45°/90°)' },
-    { key: 'G', desc: 'Toggle Ghost Blueprint Layer' },
+    { key: 'Tab / 3', desc: t('scToggle2D3D') },
+    { key: 'W / E / R', desc: t('sc3DGizmo') },
+    { key: 'V', desc: t('scSelectMove') },
+    { key: 'W (in 2D)', desc: t('scDrawWall') },
+    { key: 'D', desc: t('scDoorTool') },
+    { key: 'N', desc: t('scWindowTool') },
+    { key: 'M', desc: t('scMeasureTool') },
+    { key: 'C', desc: t('scCalibrateTool') },
+    { key: 'E (in 2D)', desc: t('scEraseTool') },
+    { key: 'F', desc: t('scFlipSwing') },
+    { key: 'S', desc: t('scGridSnap') },
+    { key: 'O', desc: t('scOrthoAngle') },
+    { key: 'G', desc: t('scGhostLayer') },
   ];
 
   const canvasShortcuts = [
-    { key: 'Space + Drag', desc: 'Pan canvas smoothly' },
-    { key: 'Middle Mouse Drag', desc: 'Pan canvas' },
-    { key: 'Mouse Wheel', desc: 'Zoom centered at cursor' },
-    { key: 'Shift (Hold)', desc: 'Temporarily lock 0° / 45° / 90° angles' },
-    { key: 'Esc / Right-Click', desc: 'Cancel active drawing segment' },
-    { key: 'Del / Backspace', desc: 'Delete selected wall segment' },
-    { key: 'Ctrl + Z', desc: 'Undo last drafting action' },
-    { key: 'Ctrl + Y', desc: 'Redo drafting action' },
+    { key: 'Space + Drag', desc: t('scPanCanvasSpace') },
+    { key: 'Middle Mouse Drag', desc: t('scPanCanvasMiddle') },
+    { key: 'Mouse Wheel', desc: t('scMouseWheelZoom') },
+    { key: 'Shift (Hold)', desc: t('scShiftClamp') },
+    { key: 'Esc / Right-Click', desc: t('scEscCancel') },
+    { key: 'Del / Backspace', desc: t('scDelWall') },
+    { key: 'Ctrl + Z', desc: t('scUndo') },
+    { key: 'Ctrl + Y', desc: t('scRedo') },
   ];
 
   return (
@@ -46,10 +48,10 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
             </div>
             <div>
               <h3 className="font-semibold text-slate-900 text-sm">
-                CAD Keyboard & Mouse Controls
+                {t('shortcutsTitle')}
               </h3>
               <p className="text-[11px] text-slate-400">
-                Planner 5D inspired drafting hotkeys
+                {t('shortcutsSub')}
               </p>
             </div>
           </div>
@@ -65,7 +67,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <div>
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
               <Keyboard className="w-3.5 h-3.5" />
-              Tool Selection Hotkeys
+              {t('toolSelectionHotkeys')}
             </div>
             <div className="grid grid-cols-2 gap-2">
               {toolShortcuts.map((item, idx) => (
@@ -85,7 +87,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
           <div>
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
               <Mouse className="w-3.5 h-3.5" />
-              Canvas Navigation & Snapping
+              {t('canvasNavSnapping')}
             </div>
             <div className="space-y-1.5">
               {canvasShortcuts.map((item, idx) => (
@@ -108,7 +110,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
             onClick={onClose}
             className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-colors"
           >
-            Got It
+            {t('gotIt')}
           </button>
         </div>
       </div>

@@ -19,11 +19,24 @@ import { TopBar } from './components/TopBar';
 import { LeftToolbar } from './components/LeftToolbar';
 import { Canvas2D } from './components/Canvas2D';
 import { RightInspectorHUD } from './components/RightInspectorHUD';
-import { SubmitModal } from './components/SubmitModal';
-import { CalibrateModal } from './components/CalibrateModal';
-import { ShortcutsModal } from './components/ShortcutsModal';
-import { UploadModal } from './components/UploadModal';
 import { Viewport3D } from './components/Viewport3D';
+
+// Lazy-loaded modal components with React.lazy() to reduce initial bundle size and boost Lighthouse performance
+const GLBModelModal = React.lazy(() =>
+  import('./components/GLBModelModal').then((m) => ({ default: m.GLBModelModal }))
+);
+const CalibrateModal = React.lazy(() =>
+  import('./components/CalibrateModal').then((m) => ({ default: m.CalibrateModal }))
+);
+const UploadModal = React.lazy(() =>
+  import('./components/UploadModal').then((m) => ({ default: m.UploadModal }))
+);
+const SubmitModal = React.lazy(() =>
+  import('./components/SubmitModal').then((m) => ({ default: m.SubmitModal }))
+);
+const ShortcutsModal = React.lazy(() =>
+  import('./components/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal }))
+);
 
 interface HistoryState {
   nodes: Node[];
@@ -74,6 +87,7 @@ export default function App() {
   const [isCalibrateModalOpen, setIsCalibrateModalOpen] = useState(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isGLBModalOpen, setIsGLBModalOpen] = useState(false);
   const [lastMeasuredPx, setLastMeasuredPx] = useState<number | undefined>(undefined);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const [toastNotification, setToastNotification] = useState<string | null>(null);
@@ -711,48 +725,70 @@ export default function App() {
         )}
       </div>
 
-      {/* 3. MODALS */}
-      {/* Upload Blueprint Reference Modal */}
-      <UploadModal
-        isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
-        onFloorPlanLoaded={handleFloorPlanLoaded}
-      />
+      {/* 3. MODALS (Code-split with React.lazy and Suspense for Lighthouse performance) */}
+      <React.Suspense fallback={null}>
+        {/* Upload Blueprint Reference Modal */}
+        {isUploadModalOpen && (
+          <UploadModal
+            isOpen={isUploadModalOpen}
+            onClose={() => setIsUploadModalOpen(false)}
+            onFloorPlanLoaded={handleFloorPlanLoaded}
+          />
+        )}
 
-      {/* Scoring Evaluation Modal */}
-      <SubmitModal
-        isOpen={isSubmitModalOpen}
-        onClose={() => setIsSubmitModalOpen(false)}
-        result={liveValidation}
-        currentLevel={currentLevel}
-        hasNextLevel={hasNextLevel}
-        onNextLevel={handleNextLevel}
-        onRetry={() => setIsSubmitModalOpen(false)}
-        onExportPng={handleExportPng}
-      />
+        {/* Scoring Evaluation Modal */}
+        {isSubmitModalOpen && (
+          <SubmitModal
+            isOpen={isSubmitModalOpen}
+            onClose={() => setIsSubmitModalOpen(false)}
+            result={liveValidation}
+            currentLevel={currentLevel}
+            hasNextLevel={hasNextLevel}
+            onNextLevel={handleNextLevel}
+            onRetry={() => setIsSubmitModalOpen(false)}
+            onExportPng={handleExportPng}
+          />
+        )}
 
-      {/* Scale Calibration Modal */}
-      <CalibrateModal
-        isOpen={isCalibrateModalOpen}
-        onClose={() => setIsCalibrateModalOpen(false)}
-        settings={settings}
-        onSaveScale={(newScale) => {
-          setSettings((prev) => ({ ...prev, scaleFactor: newScale }));
-          soundEngine.playWallComplete();
-          setToastNotification(
-            `✅ Scale ratio updated: 1m = ${(1 / newScale).toFixed(1)}px (1px = ${(newScale * 100).toFixed(2)}cm)`
-          );
-          setActiveTool('wall');
-        }}
-        lastMeasuredPx={lastMeasuredPx}
-        onStartTwoPointCalibration={handleStartCalibrationTool}
-      />
+        {/* Scale Calibration Modal */}
+        {isCalibrateModalOpen && (
+          <CalibrateModal
+            isOpen={isCalibrateModalOpen}
+            onClose={() => setIsCalibrateModalOpen(false)}
+            settings={settings}
+            onSaveScale={(newScale) => {
+              setSettings((prev) => ({ ...prev, scaleFactor: newScale }));
+              soundEngine.playWallComplete();
+              setToastNotification(
+                `✅ Scale ratio updated: 1m = ${(1 / newScale).toFixed(1)}px (1px = ${(newScale * 100).toFixed(2)}cm)`
+              );
+              setActiveTool('wall');
+            }}
+            lastMeasuredPx={lastMeasuredPx}
+            onStartTwoPointCalibration={handleStartCalibrationTool}
+          />
+        )}
 
-      {/* Keyboard Shortcuts Modal */}
-      <ShortcutsModal
-        isOpen={isShortcutsModalOpen}
-        onClose={() => setIsShortcutsModalOpen(false)}
-      />
+        {/* Keyboard Shortcuts Modal */}
+        {isShortcutsModalOpen && (
+          <ShortcutsModal
+            isOpen={isShortcutsModalOpen}
+            onClose={() => setIsShortcutsModalOpen(false)}
+          />
+        )}
+
+        {/* 3D GLB/GLTF Model Import Modal */}
+        {isGLBModalOpen && (
+          <GLBModelModal
+            isOpen={isGLBModalOpen}
+            onClose={() => setIsGLBModalOpen(false)}
+            onModelLoaded={(_model, name) => {
+              setToastNotification(`Model loaded: ${name}`);
+            }}
+            onShowToast={(msg) => setToastNotification(msg)}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 }

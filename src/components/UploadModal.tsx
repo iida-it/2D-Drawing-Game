@@ -14,6 +14,7 @@ import {
 import { UploadedFloorPlan } from '../types';
 import { processUploadedFile } from '../utils/fileUpload';
 import { soundEngine } from '../utils/audio';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   onClose,
   onFloorPlanLoaded,
 }) => {
+  const { t } = useLanguage();
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedPage, setSelectedPage] = useState<number>(1);
@@ -202,10 +204,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </div>
             <div>
               <h3 className="font-semibold text-slate-900 text-sm">
-                Upload 2D Floor Plan Reference
+                {t('uploadModalTitle')}
               </h3>
               <p className="text-[11px] text-slate-500">
-                Load custom blueprints (PNG, JPG, SVG, or multi-page PDF)
+                {t('uploadModalSub')}
               </p>
             </div>
           </div>
@@ -251,10 +253,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               </div>
 
               <div className="text-xs font-semibold text-slate-800">
-                Click to browse or drag and drop blueprint
+                {t('uploadDragDropTitle')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                PNG, JPG, SVG, or architectural PDF drawings up to 25MB
+                {t('uploadDragDropSub')}
               </p>
 
               <div className="mt-4 flex items-center gap-3">
@@ -287,7 +289,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                   className="absolute top-2 right-2 bg-white/90 text-slate-700 hover:text-slate-900 text-[10px] font-semibold px-2 py-0.5 rounded shadow-xs border border-slate-200"
                 >
-                  Change File
+                  {t('changeFile')}
                 </button>
               </div>
 
@@ -314,7 +316,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       <ChevronLeft className="w-3.5 h-3.5" />
                     </button>
                     <span className="font-mono text-[11px] text-slate-600">
-                      Page {selectedPage} / {totalPages}
+                      {t('page')} {selectedPage} / {totalPages}
                     </span>
                     <button
                       onClick={() => handlePageChange(selectedPage + 1)}
@@ -332,7 +334,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           {/* Loading Indicator */}
           {isLoading && (
             <div className="text-center text-xs text-sky-600 font-medium animate-pulse py-1">
-              Rendering architectural page preview...
+              {t('renderingPDFPreview')}
             </div>
           )}
 
@@ -349,17 +351,17 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             <div>
               <div className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                No floor plan file on hand?
+                {t('noFloorPlanPrompt')}
               </div>
               <p className="text-[11px] text-slate-500">
-                Load a high-resolution architectural apartment blueprint
+                {t('noFloorPlanSub')}
               </p>
             </div>
             <button
               onClick={handleLoadSample}
               className="px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 hover:bg-slate-100 text-xs font-semibold rounded-lg border border-slate-200 transition-colors shadow-2xs shrink-0"
             >
-              Load Sample
+              {t('loadSample')}
             </button>
           </div>
         </div>
@@ -370,7 +372,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
           >
-            Cancel
+            {t('cancel')}
           </button>
 
           <button
@@ -379,7 +381,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             className="flex-1 flex items-center justify-center gap-2 px-5 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-semibold rounded-xl shadow-md shadow-sky-200 disabled:shadow-none transition-all transform active:scale-95"
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>Load Blueprint & Calibrate Scale</span>
+            <span>{t('loadBlueprintAndCalibrate')}</span>
           </button>
         </div>
       </div>

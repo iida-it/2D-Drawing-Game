@@ -1,5 +1,20 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+
+// Standard gstatic Draco decoder path for compressed .glb loading
+const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.6/';
+
+let sharedDracoLoader: DRACOLoader | null = null;
+
+export function getDracoLoader(): DRACOLoader {
+  if (!sharedDracoLoader) {
+    sharedDracoLoader = new DRACOLoader();
+    sharedDracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+    sharedDracoLoader.preload();
+  }
+  return sharedDracoLoader;
+}
 
 export interface GLBLoadResult {
   model: THREE.Group;
@@ -90,13 +105,16 @@ export function loadGLBFromFile(file: File): Promise<GLBLoadResult> {
       return;
     }
 
-    const blobUrl = URL.createObjectURL(file);
+    const objectUrl = URL.createObjectURL(file);
     const loader = new GLTFLoader();
+    const dracoLoader = getDracoLoader();
+    loader.setDRACOLoader(dracoLoader);
 
     loader.load(
-      blobUrl,
+      objectUrl,
       (gltf) => {
-        URL.revokeObjectURL(blobUrl);
+        // Immediately revoke object URL upon completion to prevent browser memory leaks
+        URL.revokeObjectURL(objectUrl);
 
         try {
           const rawScene = gltf.scene || gltf.scenes[0];
@@ -121,7 +139,8 @@ export function loadGLBFromFile(file: File): Promise<GLBLoadResult> {
       },
       undefined,
       (error: unknown) => {
-        URL.revokeObjectURL(blobUrl);
+        // Immediately revoke object URL upon failure to prevent browser memory leaks
+        URL.revokeObjectURL(objectUrl);
         console.error('GLTFLoader parsing error:', error);
         const errMsg = error instanceof Error ? error.message : (error as any)?.message;
         reject(new Error(errMsg || 'Failed to parse binary .glb/.gltf file. Ensure it is a valid 3D model.'));

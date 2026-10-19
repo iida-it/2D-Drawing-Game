@@ -4,6 +4,7 @@ import {
   Node,
   Wall,
   WallOpening,
+  OpeningType,
   ToolType,
   BlueprintLevel,
   DraftingSettings,
@@ -47,7 +48,7 @@ interface Canvas2DProps {
   onAddWall: (startNode: Node, endNode: Node) => void;
   onAddOpening?: (
     wallId: string,
-    type: 'door' | 'window',
+    type: OpeningType,
     positionRatio: number,
     widthMeters?: number
   ) => void;
@@ -111,8 +112,32 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     point: Point;
     n1: Node;
     n2: Node;
-    type: 'door' | 'window';
+    type: OpeningType;
   } | null>(null);
+
+  const isOpeningTool = useCallback((tool: ToolType): tool is OpeningType => {
+    return (
+      tool === 'door' ||
+      tool === 'double-door' ||
+      tool === 'sliding-door' ||
+      tool === 'window'
+    );
+  }, []);
+
+  const getDefaultOpeningWidthMeters = useCallback((type: OpeningType): number => {
+    switch (type) {
+      case 'door':
+        return 0.85;
+      case 'double-door':
+        return 1.60;
+      case 'sliding-door':
+        return 1.65;
+      case 'window':
+        return 1.20;
+      default:
+        return 0.85;
+    }
+  }, []);
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
@@ -842,7 +867,26 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           });
         });
 
-        // 2. Draw openings: Doors with 2D swing arcs & Windows with glass panes
+        // Helper to render opening badge
+        const renderOpeningBadge = (tag: string, centerPt: Point, isSelectedOpening: boolean) => {
+          ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
+          const dMetrics = ctx.measureText(tag);
+          const dW = dMetrics.width + 10 / zoom;
+          const dH = 15 / zoom;
+          ctx.fillStyle = isSelectedOpening ? '#0284c7' : '#ffffff';
+          ctx.beginPath();
+          ctx.roundRect(centerPt.x - dW / 2, centerPt.y - dH / 2, dW, dH, 3 / zoom);
+          ctx.fill();
+          ctx.strokeStyle = isSelectedOpening ? '#0284c7' : '#bae6fd';
+          ctx.lineWidth = 1 / zoom;
+          ctx.stroke();
+          ctx.fillStyle = isSelectedOpening ? '#ffffff' : '#0369a1';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tag, centerPt.x, centerPt.y);
+        };
+
+        // 2. Draw openings: Single Door, Double Door, Sliding Door, and Window
         breakdown.openings.forEach((op) => {
           const isOpSelected = selectedOpeningId === op.opening.id;
           const isOpHovered = hoveredOpening?.id === op.opening.id;
@@ -850,26 +894,23 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           const p2 = op.endPt;
           const nx = breakdown.normal.x;
           const ny = breakdown.normal.y;
+          const ux = breakdown.unitVec.x;
+          const uy = breakdown.unitVec.y;
           const flip = op.opening.swingFlip ? -1 : 1;
+          const halfThick = wallThicknessPx / 2;
+
+          // Common jamb boundary tick marks at the two ends of the opening gap
+          [p1, p2].forEach((pt) => {
+            ctx.beginPath();
+            ctx.moveTo(pt.x - nx * halfThick, pt.y - ny * halfThick);
+            ctx.lineTo(pt.x + nx * halfThick, pt.y + ny * halfThick);
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
+            ctx.lineWidth = (isOpSelected ? 2.5 : 1.5) / zoom;
+            ctx.stroke();
+          });
 
           if (op.opening.type === 'door') {
-            // Door jamb boundary ticks
-            [p1, p2].forEach((pt) => {
-              ctx.beginPath();
-              ctx.moveTo(
-                pt.x - nx * (wallThicknessPx / 2),
-                pt.y - ny * (wallThicknessPx / 2)
-              );
-              ctx.lineTo(
-                pt.x + nx * (wallThicknessPx / 2),
-                pt.y + ny * (wallThicknessPx / 2)
-              );
-              ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
-              ctx.lineWidth = (isOpSelected ? 2.5 : 1.5) / zoom;
-              ctx.stroke();
-            });
-
-            // Door Hinge & Strike
+            // SINGLE DOOR (片開き戸: door leaf line + 90-degree swing arc)
             const hinge = op.opening.swingDirection === 'right' ? p2 : p1;
             const strike = op.opening.swingDirection === 'right' ? p1 : p2;
             const leafEnd = {
@@ -877,11 +918,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
               y: hinge.y + ny * op.widthPx * flip,
             };
 
-            // Translucent swing sweep arc
             const radius = op.widthPx;
             const startAngle = Math.atan2(strike.y - hinge.y, strike.x - hinge.x);
             const endAngle = Math.atan2(leafEnd.y - hinge.y, leafEnd.x - hinge.x);
 
+            // Translucent swing sweep arc fan
             ctx.fillStyle = isOpSelected
               ? 'rgba(2, 132, 199, 0.16)'
               : isOpHovered
@@ -893,7 +934,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
             ctx.closePath();
             ctx.fill();
 
-            // Door swing quarter-circle arc line
+            // Swing arc line
             ctx.beginPath();
             ctx.arc(hinge.x, hinge.y, radius, startAngle, endAngle, flip < 0);
             ctx.strokeStyle = isOpSelected ? '#0284c7' : '#38bdf8';
@@ -918,42 +959,138 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
             ctx.lineWidth = 1 / zoom;
             ctx.stroke();
 
-            // Door label tag
-            const doorTag = `${op.widthMeters.toFixed(2)}m Door`;
-            ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
-            const dMetrics = ctx.measureText(doorTag);
-            const dW = dMetrics.width + 10 / zoom;
-            const dH = 15 / zoom;
-            ctx.fillStyle = isOpSelected ? '#0284c7' : '#ffffff';
+            renderOpeningBadge(`${op.widthMeters.toFixed(2)}m Door`, op.centerPt, isOpSelected);
+          } else if (op.opening.type === 'double-door') {
+            // DOUBLE DOOR (両開き戸: dual opposing swing arcs meeting at center)
+            const halfWidth = op.widthPx / 2;
+            const midPt = op.centerPt;
+
+            // Left leaf (hinged at p1)
+            const leftLeafEnd = {
+              x: p1.x + nx * halfWidth * flip,
+              y: p1.y + ny * halfWidth * flip,
+            };
+            const leftStartAngle = Math.atan2(midPt.y - p1.y, midPt.x - p1.x);
+            const leftEndAngle = Math.atan2(leftLeafEnd.y - p1.y, leftLeafEnd.x - p1.x);
+
+            // Right leaf (hinged at p2)
+            const rightLeafEnd = {
+              x: p2.x + nx * halfWidth * flip,
+              y: p2.y + ny * halfWidth * flip,
+            };
+            const rightStartAngle = Math.atan2(midPt.y - p2.y, midPt.x - p2.x);
+            const rightEndAngle = Math.atan2(rightLeafEnd.y - p2.y, rightLeafEnd.x - p2.x);
+
+            // Translucent dual swing sweep fills
+            ctx.fillStyle = isOpSelected
+              ? 'rgba(2, 132, 199, 0.16)'
+              : isOpHovered
+              ? 'rgba(2, 132, 199, 0.12)'
+              : 'rgba(2, 132, 199, 0.07)';
+
             ctx.beginPath();
-            ctx.roundRect(op.centerPt.x - dW / 2, op.centerPt.y - dH / 2, dW, dH, 3 / zoom);
+            ctx.moveTo(p1.x, p1.y);
+            ctx.arc(p1.x, p1.y, halfWidth, leftStartAngle, leftEndAngle, flip < 0);
+            ctx.closePath();
             ctx.fill();
-            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#bae6fd';
-            ctx.lineWidth = 1 / zoom;
+
+            ctx.beginPath();
+            ctx.moveTo(p2.x, p2.y);
+            ctx.arc(p2.x, p2.y, halfWidth, rightStartAngle, rightEndAngle, flip > 0);
+            ctx.closePath();
+            ctx.fill();
+
+            // Swing arc lines
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#38bdf8';
+            ctx.lineWidth = (isOpSelected ? 2.2 : 1.5) / zoom;
+            ctx.beginPath();
+            ctx.arc(p1.x, p1.y, halfWidth, leftStartAngle, leftEndAngle, flip < 0);
             ctx.stroke();
-            ctx.fillStyle = isOpSelected ? '#ffffff' : '#0369a1';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(doorTag, op.centerPt.x, op.centerPt.y);
-          } else {
-            // Window symbol: jamb ticks, frame, and double cyan glass pane lines
-            [p1, p2].forEach((pt) => {
+
+            ctx.beginPath();
+            ctx.arc(p2.x, p2.y, halfWidth, rightStartAngle, rightEndAngle, flip > 0);
+            ctx.stroke();
+
+            // Left and Right door leaf lines
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
+            ctx.lineWidth = (isOpSelected ? 3 : 2.5) / zoom;
+            ctx.lineCap = 'round';
+
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(leftLeafEnd.x, leftLeafEnd.y);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(p2.x, p2.y);
+            ctx.lineTo(rightLeafEnd.x, rightLeafEnd.y);
+            ctx.stroke();
+
+            // Pivot hinge dots at p1 and p2
+            [p1, p2].forEach((hinge) => {
               ctx.beginPath();
-              ctx.moveTo(
-                pt.x - nx * (wallThicknessPx / 2),
-                pt.y - ny * (wallThicknessPx / 2)
-              );
-              ctx.lineTo(
-                pt.x + nx * (wallThicknessPx / 2),
-                pt.y + ny * (wallThicknessPx / 2)
-              );
-              ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
-              ctx.lineWidth = (isOpSelected ? 2.5 : 1.5) / zoom;
+              ctx.arc(hinge.x, hinge.y, (isOpSelected ? 4 : 3) / zoom, 0, Math.PI * 2);
+              ctx.fillStyle = isOpSelected ? '#0284c7' : '#0369a1';
+              ctx.fill();
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1 / zoom;
               ctx.stroke();
             });
 
-            // Outer frame/sill lines
-            const halfThick = wallThicknessPx / 2;
+            renderOpeningBadge(`${op.widthMeters.toFixed(2)}m Double Door`, op.centerPt, isOpSelected);
+          } else if (op.opening.type === 'sliding-door') {
+            // SLIDING DOOR (引違い戸: offset parallel sliding lines matching Japanese floor plan convention)
+            const overlapPx = Math.max(8 / zoom, op.widthPx * 0.15);
+            const sashOffset = 3.5 / zoom;
+
+            // Panel 1: from p1 to (center + overlap/2), offset +sashOffset
+            const p1_start = {
+              x: p1.x + nx * sashOffset,
+              y: p1.y + ny * sashOffset,
+            };
+            const p1_end = {
+              x: op.centerPt.x + ux * (overlapPx / 2) + nx * sashOffset,
+              y: op.centerPt.y + uy * (overlapPx / 2) + ny * sashOffset,
+            };
+
+            // Panel 2: from (center - overlap/2) to p2, offset -sashOffset
+            const p2_start = {
+              x: op.centerPt.x - ux * (overlapPx / 2) - nx * sashOffset,
+              y: op.centerPt.y - uy * (overlapPx / 2) - ny * sashOffset,
+            };
+            const p2_end = {
+              x: p2.x - nx * sashOffset,
+              y: p2.y - ny * sashOffset,
+            };
+
+            // Draw the two overlapping sashes
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0f172a';
+            ctx.lineWidth = (isOpSelected ? 2.5 : 2.0) / zoom;
+            ctx.lineCap = 'square';
+
+            ctx.beginPath();
+            ctx.moveTo(p1_start.x, p1_start.y);
+            ctx.lineTo(p1_end.x, p1_end.y);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(p2_start.x, p2_start.y);
+            ctx.lineTo(p2_end.x, p2_end.y);
+            ctx.stroke();
+
+            // End tick marks on sashes
+            const sashTick = 2.5 / zoom;
+            [p1_start, p1_end, p2_start, p2_end].forEach((pt) => {
+              ctx.beginPath();
+              ctx.moveTo(pt.x - nx * sashTick, pt.y - ny * sashTick);
+              ctx.lineTo(pt.x + nx * sashTick, pt.y + ny * sashTick);
+              ctx.stroke();
+            });
+
+            renderOpeningBadge(`${op.widthMeters.toFixed(2)}m Sliding Door`, op.centerPt, isOpSelected);
+          } else {
+            // WINDOW (引違い窓: parallel glass sash lines with wall boundary)
+            // Outer frame / sill lines
             ctx.beginPath();
             ctx.moveTo(p1.x + nx * halfThick, p1.y + ny * halfThick);
             ctx.lineTo(p2.x + nx * halfThick, p2.y + ny * halfThick);
@@ -974,23 +1111,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
             ctx.lineWidth = 1.5 / zoom;
             ctx.stroke();
 
-            // Window label tag
-            const winTag = `${op.widthMeters.toFixed(2)}m Window`;
-            ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
-            const wMetrics = ctx.measureText(winTag);
-            const wW = wMetrics.width + 10 / zoom;
-            const wH = 15 / zoom;
-            ctx.fillStyle = isOpSelected ? '#0284c7' : '#ffffff';
+            // Center sash divider mark
             ctx.beginPath();
-            ctx.roundRect(op.centerPt.x - wW / 2, op.centerPt.y - wH / 2, wW, wH, 3 / zoom);
-            ctx.fill();
-            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#bae6fd';
-            ctx.lineWidth = 1 / zoom;
+            ctx.moveTo(op.centerPt.x - nx * halfThick, op.centerPt.y - ny * halfThick);
+            ctx.lineTo(op.centerPt.x + nx * halfThick, op.centerPt.y + ny * halfThick);
+            ctx.strokeStyle = isOpSelected ? '#0284c7' : '#0284c7';
+            ctx.lineWidth = 2 / zoom;
             ctx.stroke();
-            ctx.fillStyle = isOpSelected ? '#ffffff' : '#0369a1';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(winTag, op.centerPt.x, op.centerPt.y);
+
+            renderOpeningBadge(`${op.widthMeters.toFixed(2)}m Window`, op.centerPt, isOpSelected);
           }
         });
 
@@ -1363,10 +1492,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       ctx.fillText(calibText, midX, midY - 24 / zoom);
     }
 
-    // 2E.3: Live Hover Ghost Preview for Door and Window Opening Tool
-    if ((activeTool === 'door' || activeTool === 'window') && hoveredOpeningWall) {
+    // 2E.3: Live Hover Ghost Preview for All Opening Tools (Single Door, Double Door, Sliding Door, Window)
+    if (isOpeningTool(activeTool) && hoveredOpeningWall) {
       const hw = hoveredOpeningWall;
-      const previewWidthM = hw.type === 'door' ? 0.9 : 1.2;
+      const previewWidthM = getDefaultOpeningWidthMeters(hw.type);
       const previewWidthPx = metersToPixels(previewWidthM, settings.scaleFactor);
 
       const previewOpening: WallOpening = {
@@ -1408,9 +1537,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
       const nx = ghostBreakdown.normal.x;
       const ny = ghostBreakdown.normal.y;
+      const ux = ghostBreakdown.unitVec.x;
+      const uy = ghostBreakdown.unitVec.y;
 
       if (hw.type === 'door') {
-        // Ghost door leaf & swing arc
+        // Ghost single door leaf & swing arc
         const hinge = ghostP1;
         const strike = ghostP2;
         const leafEnd = {
@@ -1431,6 +1562,60 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         ctx.setLineDash([4 / zoom, 3 / zoom]);
         ctx.beginPath();
         ctx.arc(hinge.x, hinge.y, radius, startAngle, endAngle, false);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (hw.type === 'double-door') {
+        // Ghost double door dual leaves & opposing arcs
+        const halfWidth = previewWidthPx / 2;
+        const midPt = hw.point;
+        const leftLeafEnd = {
+          x: ghostP1.x + nx * halfWidth,
+          y: ghostP1.y + ny * halfWidth,
+        };
+        const rightLeafEnd = {
+          x: ghostP2.x + nx * halfWidth,
+          y: ghostP2.y + ny * halfWidth,
+        };
+
+        const leftStartAngle = Math.atan2(midPt.y - ghostP1.y, midPt.x - ghostP1.x);
+        const leftEndAngle = Math.atan2(leftLeafEnd.y - ghostP1.y, leftLeafEnd.x - ghostP1.x);
+        const rightStartAngle = Math.atan2(midPt.y - ghostP2.y, midPt.x - ghostP2.x);
+        const rightEndAngle = Math.atan2(rightLeafEnd.y - ghostP2.y, rightLeafEnd.x - ghostP2.x);
+
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 2 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(ghostP1.x, ghostP1.y);
+        ctx.lineTo(leftLeafEnd.x, leftLeafEnd.y);
+        ctx.moveTo(ghostP2.x, ghostP2.y);
+        ctx.lineTo(rightLeafEnd.x, rightLeafEnd.y);
+        ctx.stroke();
+
+        ctx.setLineDash([4 / zoom, 3 / zoom]);
+        ctx.beginPath();
+        ctx.arc(ghostP1.x, ghostP1.y, halfWidth, leftStartAngle, leftEndAngle, false);
+        ctx.arc(ghostP2.x, ghostP2.y, halfWidth, rightStartAngle, rightEndAngle, true);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (hw.type === 'sliding-door') {
+        // Ghost sliding door overlapping sashes
+        const overlapPx = Math.max(8 / zoom, previewWidthPx * 0.15);
+        const sashOffset = 3.5 / zoom;
+
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 2 / zoom;
+        ctx.setLineDash([3 / zoom, 2 / zoom]);
+
+        // Panel 1
+        ctx.beginPath();
+        ctx.moveTo(ghostP1.x + nx * sashOffset, ghostP1.y + ny * sashOffset);
+        ctx.lineTo(hw.point.x + ux * (overlapPx / 2) + nx * sashOffset, hw.point.y + uy * (overlapPx / 2) + ny * sashOffset);
+        ctx.stroke();
+
+        // Panel 2
+        ctx.beginPath();
+        ctx.moveTo(hw.point.x - ux * (overlapPx / 2) - nx * sashOffset, hw.point.y - uy * (overlapPx / 2) - ny * sashOffset);
+        ctx.lineTo(ghostP2.x - nx * sashOffset, ghostP2.y - ny * sashOffset);
         ctx.stroke();
         ctx.setLineDash([]);
       } else {
@@ -1578,6 +1763,18 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         if (selectedWallId) {
           onDeleteWall(selectedWallId);
           onSelectWall(null);
+        } else if (selectedOpeningId && onDeleteOpening) {
+          onDeleteOpening(selectedOpeningId);
+          if (onSelectOpening) onSelectOpening(null);
+        }
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        if (selectedOpeningId && onUpdateOpening) {
+          const currentOp = openings.find((o) => o.id === selectedOpeningId);
+          if (currentOp) {
+            onUpdateOpening(selectedOpeningId, { swingFlip: !currentOp.swingFlip });
+            soundEngine.playPencilClick();
+          }
         }
       }
     };
@@ -1598,7 +1795,18 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activeDrawingNode, measureStartPoint, selectedWallId, onDeleteWall, onSelectWall]);
+  }, [
+    activeDrawingNode,
+    measureStartPoint,
+    selectedWallId,
+    selectedOpeningId,
+    openings,
+    onDeleteWall,
+    onSelectWall,
+    onDeleteOpening,
+    onUpdateOpening,
+    onSelectOpening,
+  ]);
 
   // Mouse Wheel Zoom
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1686,8 +1894,8 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
     setHoveredOpening(foundOpening);
 
-    // Door or Window Tool: Snap opening onto hovered wall
-    if (activeTool === 'door' || activeTool === 'window') {
+    // Opening Tools (Single Door, Double Door, Sliding Door, Window): Snap opening onto hovered wall
+    if (isOpeningTool(activeTool)) {
       let bestWall: Wall | null = null;
       let bestDist = 24 / zoom;
       let bestT = 0.5;
@@ -1707,7 +1915,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
             bestN2 = n2;
 
             const wallLenPx = getDistance(n1, n2);
-            const openWidthM = activeTool === 'door' ? 0.9 : 1.2;
+            const openWidthM = getDefaultOpeningWidthMeters(activeTool);
             const openWidthPx = metersToPixels(openWidthM, settings.scaleFactor);
             const halfRatio = (openWidthPx / 2) / wallLenPx;
 
@@ -1815,8 +2023,8 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     const world = screenToWorld(mouseScreenX, mouseScreenY);
 
-    // DOOR OR WINDOW TOOL
-    if (activeTool === 'door' || activeTool === 'window') {
+    // OPENING TOOLS (Single Door, Double Door, Sliding Door, Window)
+    if (isOpeningTool(activeTool)) {
       if (hoveredOpeningWall && onAddOpening) {
         onAddOpening(
           hoveredOpeningWall.wall.id,
@@ -2014,7 +2222,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (activeTool === 'wall' || activeTool === 'measure' || activeTool === 'calibrate') {
       return 'cursor-crosshair';
     }
-    if (activeTool === 'door' || activeTool === 'window') {
+    if (isOpeningTool(activeTool)) {
       return hoveredOpeningWall ? 'cursor-pointer' : 'cursor-crosshair';
     }
     if (activeTool === 'erase') {
@@ -2137,12 +2345,20 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
                 : 'Click to start drafting wall'
               : activeTool === 'door'
               ? hoveredOpeningWall
-                ? 'Click wall to place door opening · F to flip swing'
-                : 'Hover over any wall segment to snap door opening'
+                ? 'Click wall to place Single Door · F to flip swing'
+                : 'Hover over any wall segment to snap Single Door'
+              : activeTool === 'double-door'
+              ? hoveredOpeningWall
+                ? 'Click wall to place Double Door · F to flip swing'
+                : 'Hover over any wall segment to snap Double Door'
+              : activeTool === 'sliding-door'
+              ? hoveredOpeningWall
+                ? 'Click wall to place Sliding Door'
+                : 'Hover over any wall segment to snap Sliding Door'
               : activeTool === 'window'
               ? hoveredOpeningWall
-                ? 'Click wall to place window opening'
-                : 'Hover over any wall segment to snap window opening'
+                ? 'Click wall to place Window'
+                : 'Hover over any wall segment to snap Window'
               : activeTool === 'measure'
               ? 'Click two points to measure distance'
               : activeTool === 'select'

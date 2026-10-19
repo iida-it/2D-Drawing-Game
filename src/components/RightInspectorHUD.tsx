@@ -26,6 +26,7 @@ import {
   RoomType,
 } from '../types';
 import { pixelsToMeters, getDistance, formatMeters, ROOM_THEMES } from '../utils/geometry';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface RightInspectorHUDProps {
   currentLevel: BlueprintLevel;
@@ -68,8 +69,25 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
   isCollapsed,
   onToggleCollapse,
 }) => {
+  const { t, language } = useLanguage();
   const client = currentLevel.client;
   const targetSpecs = currentLevel.targetSpecs;
+
+  const roomNames: Record<RoomType, { en: string; ja: string }> = {
+    living: { en: 'Living Room', ja: 'リビング' },
+    bedroom: { en: 'Bedroom', ja: '寝室' },
+    kitchen: { en: 'Kitchen', ja: 'キッチン' },
+    bathroom: { en: 'Bathroom', ja: '浴室・洗面' },
+    office: { en: 'Home Office', ja: '書斎・ワーク' },
+    dining: { en: 'Dining', ja: 'ダイニング' },
+  };
+
+  const openingSymbolLabels: Record<string, { en: string; ja: string }> = {
+    door: { en: 'Single', ja: '片開き' },
+    'double-door': { en: 'Double', ja: '両開き' },
+    'sliding-door': { en: 'Sliding', ja: '引き戸' },
+    window: { en: 'Window', ja: '窓' },
+  };
 
   // Selected wall metrics
   let selectedWallLengthMeters = 0;
@@ -94,7 +112,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
       <button
         onClick={onToggleCollapse}
         className="absolute -left-9 top-4 w-9 h-10 bg-white/95 backdrop-blur-md border border-slate-200/90 border-r-0 rounded-l-xl shadow-md flex items-center justify-center text-slate-500 hover:text-slate-900 transition-colors"
-        title={isCollapsed ? 'Open HUD Inspector' : 'Collapse HUD'}
+        title={isCollapsed ? t('openHUDInspector') : t('collapseHUD')}
       >
         <ChevronRight
           className={`w-4 h-4 transition-transform ${isCollapsed ? 'rotate-180' : ''}`}
@@ -122,11 +140,11 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   {customFloorPlan.name}
                 </h3>
                 <span className="text-[10px] text-sky-700 font-semibold bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded">
-                  Custom
+                  {t('customBadge')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 truncate">
-                {customFloorPlan.width} × {customFloorPlan.height} px reference
+                {customFloorPlan.width} × {customFloorPlan.height} px {t('referenceSubtitle')}
               </p>
               <div className="mt-2 flex items-center gap-1.5">
                 {onStartCalibrationTool && (
@@ -135,7 +153,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                     className="flex-1 py-1 px-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 shadow-2xs transition-colors"
                   >
                     <Sliders className="w-3 h-3" />
-                    <span>Calibrate 2 Points</span>
+                    <span>{t('calibrate2Points')}</span>
                   </button>
                 )}
                 {onOpenUpload && (
@@ -143,7 +161,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                     onClick={onOpenUpload}
                     className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-medium transition-colors"
                   >
-                    Change
+                    {t('changePlan')}
                   </button>
                 )}
               </div>
@@ -167,7 +185,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   {client.name}
                 </h3>
                 <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded">
-                  Ch. {currentLevel.levelNumber}
+                  {t('challengeLevel')} {currentLevel.levelNumber}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 truncate">{client.role}</p>
@@ -183,7 +201,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-sky-600" />
-              Live Accuracy
+              {t('liveAccuracy')}
             </span>
             <span
               className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
@@ -194,7 +212,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   : 'bg-slate-200 text-slate-700'
               }`}
             >
-              {liveValidation.scorePercent}% Match
+              {liveValidation.scorePercent}% {t('match')}
             </span>
           </div>
 
@@ -216,30 +234,30 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             {/* Room Area */}
             <div className="bg-white p-2 rounded-lg border border-slate-100">
-              <span className="text-slate-400 block text-[10px]">Room Area</span>
+              <span className="text-slate-400 block text-[10px]">{t('roomArea')}</span>
               <div className="font-semibold text-slate-800 font-mono mt-0.5">
                 {liveValidation.drawnAreaMetersSq.toFixed(2)} m²
               </div>
               <span className="text-[10px] text-slate-500">
-                Target: {targetSpecs.totalAreaMetersSq.toFixed(2)} m²
+                {t('target')}: {targetSpecs.totalAreaMetersSq.toFixed(2)} m²
               </span>
             </div>
 
             {/* Perimeter & Deviation */}
             <div className="bg-white p-2 rounded-lg border border-slate-100">
-              <span className="text-slate-400 block text-[10px]">Perimeter</span>
+              <span className="text-slate-400 block text-[10px]">{t('perimeter')}</span>
               <div className="font-semibold text-slate-800 font-mono mt-0.5">
                 {liveValidation.totalDrawnPerimeterMeters.toFixed(2)} m
               </div>
               <span className="text-[10px] text-slate-500">
-                Target: {targetSpecs.totalPerimeterMeters.toFixed(2)} m
+                {t('target')}: {targetSpecs.totalPerimeterMeters.toFixed(2)} m
               </span>
             </div>
           </div>
 
           {/* Real-time Deviation Readout */}
           <div className="mt-2.5 pt-2 border-t border-slate-200/50 flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Dimension Deviation:</span>
+            <span className="text-slate-500">{t('dimensionDeviation')}</span>
             <span
               className={`font-mono font-semibold flex items-center gap-1 ${
                 liveValidation.meanDeviationMeters <= targetSpecs.toleranceMeters
@@ -268,12 +286,12 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   <AppWindow className="w-4 h-4 text-sky-600" />
                 )}
                 {selectedOpening.type === 'door'
-                  ? 'Single Door (片開き戸)'
+                  ? t('singleDoorLabel')
                   : selectedOpening.type === 'double-door'
-                  ? 'Double Door (両開き戸)'
+                  ? t('doubleDoorLabel')
                   : selectedOpening.type === 'sliding-door'
-                  ? 'Sliding Door (引違い戸)'
-                  : 'Window (引違い窓)'}
+                  ? t('slidingDoorLabel')
+                  : t('windowLabel')}
               </span>
               {onDeleteOpening && (
                 <button
@@ -281,7 +299,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   className="text-[11px] text-rose-600 hover:text-rose-700 hover:underline font-medium flex items-center gap-1"
                 >
                   <Trash2 className="w-3 h-3" />
-                  Delete
+                  {t('delete')}
                 </button>
               )}
             </div>
@@ -290,18 +308,19 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             {onUpdateOpening && (
               <div>
                 <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                  Symbol Convention
+                  {t('openingSymbolConvention')}
                 </span>
                 <div className="grid grid-cols-4 gap-1">
                   {(
                     [
-                      { type: 'door', label: 'Single' },
-                      { type: 'double-door', label: 'Double' },
-                      { type: 'sliding-door', label: 'Sliding' },
-                      { type: 'window', label: 'Window' },
+                      { type: 'door', key: 'door' },
+                      { type: 'double-door', key: 'double-door' },
+                      { type: 'sliding-door', key: 'sliding-door' },
+                      { type: 'window', key: 'window' },
                     ] as const
                   ).map((item) => {
                     const isCur = selectedOpening.type === item.type;
+                    const label = openingSymbolLabels[item.type]?.[language] || item.key;
                     return (
                       <button
                         key={item.type}
@@ -324,7 +343,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                             : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
                         }`}
                       >
-                        {item.label}
+                        {label}
                       </button>
                     );
                   })}
@@ -335,7 +354,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             {/* Opening Width Presets */}
             <div>
               <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                Opening Width
+                {t('openingWidth')}
               </span>
               <div className="grid grid-cols-4 gap-1">
                 {(selectedOpening.type === 'door'
@@ -376,7 +395,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   className="flex-1 px-2 py-1 bg-white hover:bg-sky-50 text-sky-800 text-[10px] font-semibold rounded-lg border border-sky-200 flex items-center justify-center gap-1 shadow-2xs"
                 >
                   <RotateCw className="w-3 h-3" />
-                  Hinge: {selectedOpening.swingDirection === 'right' ? 'Right' : 'Left'}
+                  {t('hinge')} {selectedOpening.swingDirection === 'right' ? t('hingeRight') : t('hingeLeft')}
                 </button>
 
                 <button
@@ -387,7 +406,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   }
                   className="flex-1 px-2 py-1 bg-white hover:bg-sky-50 text-sky-800 text-[10px] font-semibold rounded-lg border border-sky-200 flex items-center justify-center gap-1 shadow-2xs"
                 >
-                  <span>Flip Swing (F)</span>
+                  <span>{t('flipSwingF')}</span>
                 </button>
               </div>
             )}
@@ -400,20 +419,20 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-semibold text-sky-900 flex items-center gap-1">
                 <Ruler className="w-3.5 h-3.5 text-sky-600" />
-                Selected Segment
+                {t('selectedSegment')}
               </span>
               <button
                 onClick={() => onDeleteWall(selectedWall.id)}
                 className="text-[11px] text-rose-600 hover:text-rose-700 hover:underline font-medium"
               >
-                Delete
+                {t('delete')}
               </button>
             </div>
             <div className="text-xs font-mono font-bold text-slate-900">
-              Length: {formatMeters(selectedWallLengthMeters)}
+              {t('length')} {formatMeters(selectedWallLengthMeters)}
             </div>
             <div className="text-[10px] text-slate-500 mt-0.5">
-              Press <kbd className="px-1 bg-white rounded border text-slate-700">Del</kbd> to remove segment
+              {t('pressDelToRemove')}
             </div>
           </div>
         )}
@@ -436,7 +455,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                   className="w-2.5 h-2.5 rounded-full"
                   style={{ backgroundColor: selectedRoom.borderColor }}
                 />
-                {selectedRoom.name}
+                {roomNames[selectedRoom.roomType]?.[language] || selectedRoom.name}
               </span>
               <span className="text-xs font-mono font-bold text-slate-900">
                 {selectedRoom.areaMetersSq.toFixed(2)} m²
@@ -444,9 +463,9 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             </div>
 
             <div className="flex items-center justify-between text-[11px] text-slate-600">
-              <span>Perimeter: {selectedRoom.perimeterMeters.toFixed(2)} m</span>
+              <span>{t('perimeter')}: {selectedRoom.perimeterMeters.toFixed(2)} m</span>
               <span className="text-[10px] text-slate-500 font-mono">
-                {selectedRoom.points.length} corners
+                {selectedRoom.points.length} {t('corners')}
               </span>
             </div>
 
@@ -454,7 +473,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             {onChangeRoomType && (
               <div className="pt-2 border-t border-slate-200/60">
                 <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                  Change Room Label & Theme
+                  {t('changeRoomLabelAndTheme')}
                 </span>
                 <div className="grid grid-cols-3 gap-1">
                   {(
@@ -466,20 +485,20 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
                       'office',
                       'dining',
                     ] as RoomType[]
-                  ).map((t) => {
-                    const theme = ROOM_THEMES[t];
-                    const isCurrent = selectedRoom.roomType === t;
+                  ).map((rtype) => {
+                    const isCurrent = selectedRoom.roomType === rtype;
+                    const rName = roomNames[rtype]?.[language] || ROOM_THEMES[rtype].name;
                     return (
                       <button
-                        key={t}
-                        onClick={() => onChangeRoomType(selectedRoom.id, t)}
+                        key={rtype}
+                        onClick={() => onChangeRoomType(selectedRoom.id, rtype)}
                         className={`px-1.5 py-1 rounded text-[10px] font-semibold text-center truncate border transition-colors ${
                           isCurrent
                             ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
                             : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
                         }`}
                       >
-                        {theme.name}
+                        {rName}
                       </button>
                     );
                   })}
@@ -494,7 +513,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
           <div className="flex items-center justify-between text-xs font-medium text-slate-700">
             <span className="flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-slate-500" />
-              Ghost Blueprint Opacity
+              {t('ghostBlueprintOpacity')}
             </span>
             <span className="font-mono text-slate-500 text-[11px]">
               {Math.round(settings.ghostOpacity * 100)}%
@@ -519,7 +538,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             />
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-400">
-            <span>0% (Hide)</span>
+            <span>0% ({t('hide')})</span>
             <button
               onClick={() =>
                 onUpdateSettings((prev) => ({
@@ -530,9 +549,9 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
               }
               className="text-sky-600 hover:underline font-medium"
             >
-              {settings.ghostOpacity === 0 ? 'Reveal Blueprint' : 'Solo Vector'}
+              {settings.ghostOpacity === 0 ? t('revealBlueprint') : t('soloVector')}
             </button>
-            <span>100% (Solid)</span>
+            <span>100% ({t('solid')})</span>
           </div>
         </div>
 
@@ -540,7 +559,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
         <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs">
           <div className="font-semibold text-slate-700 text-[11px] uppercase tracking-wider mb-1 flex items-center gap-1">
             <Info className="w-3 h-3 text-slate-400" />
-            Architectural Tasks
+            {t('architecturalTasks')}
           </div>
           <ul className="space-y-1.5 text-[11px] text-slate-600">
             {client.challengeInstructions.map((ins, idx) => (
@@ -555,14 +574,14 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
         {/* Scale & Calibration Footer */}
         <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
           <div className="flex items-center gap-1 font-mono">
-            <span>Scale: 1 px = {(settings.scaleFactor * 100).toFixed(0)} cm</span>
+            <span>{t('scaleRatio')} {(settings.scaleFactor * 100).toFixed(0)} cm</span>
           </div>
           <button
             onClick={onOpenCalibrate}
             className="flex items-center gap-1 text-sky-600 hover:text-sky-700 hover:underline font-medium"
           >
             <Sliders className="w-3 h-3" />
-            Calibrate
+            {t('calibrate')}
           </button>
         </div>
       </div>

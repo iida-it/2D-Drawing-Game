@@ -13,6 +13,7 @@ import {
 import confetti from 'canvas-confetti';
 import { ValidationResult, BlueprintLevel } from '../types';
 import { soundEngine } from '../utils/audio';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface SubmitModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
   onRetry,
   onExportPng,
 }) => {
+  const { t } = useLanguage();
   useEffect(() => {
     if (isOpen) {
       if (result.stars >= 2) {
@@ -78,10 +80,10 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs uppercase tracking-wider font-semibold text-sky-400">
-                  Client Review
+                  {t('clientReview')}
                 </span>
                 <span className="text-[11px] bg-white/15 px-2 py-0.5 rounded text-slate-200">
-                  Level {currentLevel.levelNumber}
+                  {t('level')} {currentLevel.levelNumber}
                 </span>
               </div>
               <h2 className="text-lg font-bold text-white tracking-tight mt-0.5">
@@ -126,7 +128,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
                 {result.scorePercent}%
               </span>
               <span className="text-sm font-semibold text-slate-500">
-                Accuracy Match
+                {t('accuracyMatch')}
               </span>
             </div>
 
@@ -139,7 +141,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
           {/* Metric Breakdown Table */}
           <div className="space-y-2">
             <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              Dimensional Evaluation
+              {t('dimensionalEvaluation')}
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {result.checklist.map((item, idx) => {
@@ -158,7 +160,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
                         {item.actualValue}
                       </div>
                       <span className="text-[10px] text-slate-400">
-                        Target: {item.targetValue}
+                        {t('target')}: {item.targetValue}
                       </span>
                     </div>
 
@@ -184,7 +186,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Refine Draft</span>
+              <span>{t('refineDraft')}</span>
             </button>
 
             <button
@@ -193,7 +195,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
               title="Save blueprint drawing as PNG image"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export PNG</span>
+              <span>{t('exportPNG')}</span>
             </button>
 
             {hasNextLevel && result.passed ? (
@@ -201,7 +203,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
                 onClick={onNextLevel}
                 className="flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-xl shadow-md shadow-sky-200 transition-all transform active:scale-95 ml-auto"
               >
-                <span>Next Client</span>
+                <span>{t('nextClient')}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             ) : (
@@ -210,7 +212,7 @@ export const SubmitModal: React.FC<SubmitModalProps> = ({
                 className="flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-md transition-all ml-auto"
               >
                 <Trophy className="w-4 h-4 text-amber-400" />
-                <span>Continue Studio</span>
+                <span>{t('continueStudio')}</span>
               </button>
             )}
           </div>

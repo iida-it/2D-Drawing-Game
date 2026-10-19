@@ -806,7 +806,14 @@ export function getWallOpeningsBreakdown(
     marginDimensions.push({
       type: 'opening',
       label: formatMeters(openDistM),
-      subLabel: op.opening.type === 'door' ? 'Door' : 'Window',
+      subLabel:
+        op.opening.type === 'door'
+          ? 'Door'
+          : op.opening.type === 'double-door'
+          ? 'Double Door'
+          : op.opening.type === 'sliding-door'
+          ? 'Sliding'
+          : 'Window',
       p1: pOpen1,
       p2: pOpen2,
       midPt: openMid,

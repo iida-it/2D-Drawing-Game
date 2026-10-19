@@ -160,15 +160,15 @@ export function getArchitecturalMaterials() {
   });
 
   const glassMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    transmission: 0.92,
-    opacity: 1,
+    color: 0x93c5fd, // Architectural semi-transparent light blue glass
+    transmission: 0.88,
+    opacity: 0.82,
     transparent: true,
     roughness: 0.08,
     ior: 1.52,
-    thickness: 0.05,
+    thickness: 0.04,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.1,
+    clearcoatRoughness: 0.08,
   });
 
   return {
@@ -509,8 +509,14 @@ export function build3DArchitecturalModel({
           z: p1_3d.z + dirZ * opEndDist,
         };
 
+        const midX = (opP1.x + opP2.x) / 2;
+        const midZ = (opP1.z + opP2.z) / 2;
+        const opWidth = Math.hypot(opP2.x - opP1.x, opP2.z - opP1.z);
+        const wallAngle = Math.atan2(-dz, dx);
+
         if (op.type === 'door') {
-          // Lintel wall segment above the door opening
+          // SINGLE DOOR (片開き戸: Header, Jamb, 3D Door Leaf slightly ajar, Brass Handle)
+          // 1. Wall header above door
           if (wallHeightMeters > doorHeight + 0.05) {
             const lintelSeg = [
               {
@@ -524,41 +530,313 @@ export function build3DArchitecturalModel({
             ];
             const lintelGroup = generate3DFrom2DWalls(lintelSeg);
             lintelGroup.position.y = doorHeight;
+            lintelGroup.name = `WallHeader_Door_${op.id}`;
             wallsGroup.add(lintelGroup);
           }
 
-          // 3D Architectural Door Leaf & Jamb
+          // 2. Door Assembly Group
           const doorGroup = new THREE.Group();
-          const doorWidth = Math.hypot(opP2.x - opP1.x, opP2.z - opP1.z);
-          const doorThickness = 0.04; // 4cm door leaf
+          doorGroup.name = `DoorAssembly_${op.id}`;
+          doorGroup.position.set(midX, 0, midZ);
+          doorGroup.rotation.y = wallAngle;
 
-          // Door leaf geometry
-          const doorLeafGeom = new THREE.BoxGeometry(doorWidth, doorHeight, doorThickness);
-          doorLeafGeom.computeVertexNormals();
-          const doorLeaf = new THREE.Mesh(doorLeafGeom, doorWoodMaterial);
+          // Anthracite aluminum / dark wood jamb trims
+          const jambThick = 0.035;
+          const jambDepth = thickness + 0.01;
+          const leftJambGeom = new THREE.BoxGeometry(jambThick, doorHeight, jambDepth);
+          leftJambGeom.computeVertexNormals();
+          const leftJamb = new THREE.Mesh(leftJambGeom, windowFrameMaterial);
+          leftJamb.position.set(-opWidth / 2 + jambThick / 2, doorHeight / 2, 0);
+          leftJamb.castShadow = true;
+          leftJamb.name = `DoorJamb_Left_${op.id}`;
+          doorGroup.add(leftJamb);
+
+          const rightJambGeom = new THREE.BoxGeometry(jambThick, doorHeight, jambDepth);
+          rightJambGeom.computeVertexNormals();
+          const rightJamb = new THREE.Mesh(rightJambGeom, windowFrameMaterial);
+          rightJamb.position.set(opWidth / 2 - jambThick / 2, doorHeight / 2, 0);
+          rightJamb.castShadow = true;
+          rightJamb.name = `DoorJamb_Right_${op.id}`;
+          doorGroup.add(rightJamb);
+
+          const topJambGeom = new THREE.BoxGeometry(opWidth, jambThick, jambDepth);
+          topJambGeom.computeVertexNormals();
+          const topJamb = new THREE.Mesh(topJambGeom, windowFrameMaterial);
+          topJamb.position.set(0, doorHeight - jambThick / 2, 0);
+          topJamb.castShadow = true;
+          topJamb.name = `DoorJamb_Top_${op.id}`;
+          doorGroup.add(topJamb);
+
+          // 3. 3D Architectural Door Leaf (slightly ajar into room)
+          const leafWidth = opWidth - jambThick * 2 - 0.01;
+          const leafHeight = doorHeight - jambThick - 0.01;
+          const leafThick = 0.04; // 4cm solid wood door leaf
+
+          const leafGeom = new THREE.BoxGeometry(leafWidth, leafHeight, leafThick);
+          leafGeom.computeVertexNormals();
+          const doorLeaf = new THREE.Mesh(leafGeom, doorWoodMaterial);
+          doorLeaf.position.set(leafWidth / 2, leafHeight / 2, 0);
           doorLeaf.castShadow = true;
           doorLeaf.receiveShadow = true;
+          doorLeaf.name = `DoorLeaf_${op.id}`;
 
-          // Swing door open at a 45-degree angle
-          const swingAngle = Math.PI / 4;
-          doorLeaf.position.set(doorWidth / 2, doorHeight / 2, 0);
+          // Brass door handle lever & rosette
+          const handleStemGeom = new THREE.CylinderGeometry(0.01, 0.01, 0.05, 12);
+          handleStemGeom.rotateX(Math.PI / 2);
+          const handleStem = new THREE.Mesh(handleStemGeom, doorHandleMaterial);
+          handleStem.position.set(leafWidth - 0.08, 0.95, leafThick / 2 + 0.025);
+          handleStem.castShadow = true;
+          doorLeaf.add(handleStem);
 
-          const pivotGroup = new THREE.Group();
-          pivotGroup.add(doorLeaf);
-          pivotGroup.rotation.y = swingAngle;
+          const handleLeverGeom = new THREE.CylinderGeometry(0.012, 0.012, 0.12, 12);
+          handleLeverGeom.rotateZ(Math.PI / 2);
+          const handleLever = new THREE.Mesh(handleLeverGeom, doorHandleMaterial);
+          handleLever.position.set(leafWidth - 0.12, 0.95, leafThick / 2 + 0.05);
+          handleLever.castShadow = true;
+          handleLever.name = `DoorHandle_${op.id}`;
+          doorLeaf.add(handleLever);
 
-          // Brass door handle
-          const handleGeom = new THREE.CylinderGeometry(0.015, 0.015, 0.12, 12);
-          const handle = new THREE.Mesh(handleGeom, doorHandleMaterial);
-          handle.rotation.z = Math.PI / 2;
-          handle.position.set(doorWidth - 0.08, 0.95, 0.035);
-          doorLeaf.add(handle);
+          // Pivot group at hinge point
+          const pivot = new THREE.Group();
+          pivot.name = `DoorHingePivot_${op.id}`;
+          const isRightHinged = op.swingDirection === 'right';
+          const hingeX = isRightHinged
+            ? opWidth / 2 - jambThick
+            : -opWidth / 2 + jambThick;
+          pivot.position.set(hingeX, 0, 0);
 
-          // Position door at hinge point
-          pivotGroup.position.set(opP1.x, 0, opP1.z);
-          pivotGroup.rotation.y = Math.atan2(dz, dx) + (op.swingDirection === 'right' ? 0 : Math.PI);
-          wallsGroup.add(pivotGroup);
+          if (isRightHinged) {
+            doorLeaf.position.set(-leafWidth / 2, leafHeight / 2, 0);
+          }
+
+          // Ajar angle ~35°
+          const flipSign = op.swingFlip ? -1 : 1;
+          const ajarAngle = Math.PI * 0.2 * flipSign * (isRightHinged ? -1 : 1);
+          pivot.rotation.y = ajarAngle;
+          pivot.add(doorLeaf);
+          doorGroup.add(pivot);
+
+          wallsGroup.add(doorGroup);
+        } else if (op.type === 'double-door') {
+          // DOUBLE DOOR (両開き戸: Header, Jamb, Dual Opposing 3D Door Leaves, Dual Brass Handles)
+          // 1. Wall header above double door
+          if (wallHeightMeters > doorHeight + 0.05) {
+            const lintelSeg = [
+              {
+                x1: opP1.x,
+                y1: opP1.z,
+                x2: opP2.x,
+                y2: opP2.z,
+                thickness,
+                height: wallHeightMeters - doorHeight,
+              },
+            ];
+            const lintelGroup = generate3DFrom2DWalls(lintelSeg);
+            lintelGroup.position.y = doorHeight;
+            lintelGroup.name = `WallHeader_DoubleDoor_${op.id}`;
+            wallsGroup.add(lintelGroup);
+          }
+
+          // 2. Double Door Assembly Group
+          const doorGroup = new THREE.Group();
+          doorGroup.name = `DoubleDoorAssembly_${op.id}`;
+          doorGroup.position.set(midX, 0, midZ);
+          doorGroup.rotation.y = wallAngle;
+
+          const jambThick = 0.035;
+          const jambDepth = thickness + 0.01;
+
+          // Left and Right Frame Jambs
+          const leftJambGeom = new THREE.BoxGeometry(jambThick, doorHeight, jambDepth);
+          leftJambGeom.computeVertexNormals();
+          const leftJamb = new THREE.Mesh(leftJambGeom, windowFrameMaterial);
+          leftJamb.position.set(-opWidth / 2 + jambThick / 2, doorHeight / 2, 0);
+          leftJamb.castShadow = true;
+          doorGroup.add(leftJamb);
+
+          const rightJambGeom = new THREE.BoxGeometry(jambThick, doorHeight, jambDepth);
+          rightJambGeom.computeVertexNormals();
+          const rightJamb = new THREE.Mesh(rightJambGeom, windowFrameMaterial);
+          rightJamb.position.set(opWidth / 2 - jambThick / 2, doorHeight / 2, 0);
+          rightJamb.castShadow = true;
+          doorGroup.add(rightJamb);
+
+          const topJambGeom = new THREE.BoxGeometry(opWidth, jambThick, jambDepth);
+          topJambGeom.computeVertexNormals();
+          const topJamb = new THREE.Mesh(topJambGeom, windowFrameMaterial);
+          topJamb.position.set(0, doorHeight - jambThick / 2, 0);
+          topJamb.castShadow = true;
+          doorGroup.add(topJamb);
+
+          // Dual leaves (Left leaf and Right leaf)
+          const singleLeafWidth = (opWidth - jambThick * 2 - 0.02) / 2;
+          const leafHeight = doorHeight - jambThick - 0.01;
+          const leafThick = 0.04;
+          const flipSign = op.swingFlip ? -1 : 1;
+          const ajarAngle = Math.PI * 0.18 * flipSign;
+
+          // Left Door Leaf
+          const leftLeafGeom = new THREE.BoxGeometry(singleLeafWidth, leafHeight, leafThick);
+          leftLeafGeom.computeVertexNormals();
+          const leftLeaf = new THREE.Mesh(leftLeafGeom, doorWoodMaterial);
+          leftLeaf.position.set(singleLeafWidth / 2, leafHeight / 2, 0);
+          leftLeaf.castShadow = true;
+          leftLeaf.receiveShadow = true;
+          leftLeaf.name = `DoubleDoorLeaf_Left_${op.id}`;
+
+          const leftHandleLever = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.012, 0.1, 12),
+            doorHandleMaterial
+          );
+          leftHandleLever.rotateZ(Math.PI / 2);
+          leftHandleLever.position.set(singleLeafWidth - 0.06, 0.95, leafThick / 2 + 0.03);
+          leftHandleLever.castShadow = true;
+          leftLeaf.add(leftHandleLever);
+
+          const leftPivot = new THREE.Group();
+          leftPivot.position.set(-opWidth / 2 + jambThick, 0, 0);
+          leftPivot.rotation.y = ajarAngle;
+          leftPivot.add(leftLeaf);
+          doorGroup.add(leftPivot);
+
+          // Right Door Leaf
+          const rightLeafGeom = new THREE.BoxGeometry(singleLeafWidth, leafHeight, leafThick);
+          rightLeafGeom.computeVertexNormals();
+          const rightLeaf = new THREE.Mesh(rightLeafGeom, doorWoodMaterial);
+          rightLeaf.position.set(-singleLeafWidth / 2, leafHeight / 2, 0);
+          rightLeaf.castShadow = true;
+          rightLeaf.receiveShadow = true;
+          rightLeaf.name = `DoubleDoorLeaf_Right_${op.id}`;
+
+          const rightHandleLever = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.012, 0.1, 12),
+            doorHandleMaterial
+          );
+          rightHandleLever.rotateZ(Math.PI / 2);
+          rightHandleLever.position.set(-singleLeafWidth + 0.06, 0.95, leafThick / 2 + 0.03);
+          rightHandleLever.castShadow = true;
+          rightLeaf.add(rightHandleLever);
+
+          const rightPivot = new THREE.Group();
+          rightPivot.position.set(opWidth / 2 - jambThick, 0, 0);
+          rightPivot.rotation.y = -ajarAngle;
+          rightPivot.add(rightLeaf);
+          doorGroup.add(rightPivot);
+
+          wallsGroup.add(doorGroup);
+        } else if (op.type === 'sliding-door') {
+          // SLIDING DOOR (引違い戸: Header, Top Track, Two Overlapping Sliding Panels)
+          // 1. Wall header above sliding door
+          if (wallHeightMeters > doorHeight + 0.05) {
+            const lintelSeg = [
+              {
+                x1: opP1.x,
+                y1: opP1.z,
+                x2: opP2.x,
+                y2: opP2.z,
+                thickness,
+                height: wallHeightMeters - doorHeight,
+              },
+            ];
+            const lintelGroup = generate3DFrom2DWalls(lintelSeg);
+            lintelGroup.position.y = doorHeight;
+            lintelGroup.name = `WallHeader_SlidingDoor_${op.id}`;
+            wallsGroup.add(lintelGroup);
+          }
+
+          // 2. Sliding Door Assembly Group
+          const doorGroup = new THREE.Group();
+          doorGroup.name = `SlidingDoorAssembly_${op.id}`;
+          doorGroup.position.set(midX, 0, midZ);
+          doorGroup.rotation.y = wallAngle;
+
+          const jambThick = 0.035;
+          const jambDepth = thickness + 0.02;
+
+          // Upper Sliding Guide Track
+          const trackGeom = new THREE.BoxGeometry(opWidth, 0.06, jambDepth);
+          trackGeom.computeVertexNormals();
+          const trackMesh = new THREE.Mesh(trackGeom, windowFrameMaterial);
+          trackMesh.position.set(0, doorHeight - 0.03, 0);
+          trackMesh.castShadow = true;
+          doorGroup.add(trackMesh);
+
+          // Side Jambs
+          const leftJambGeom = new THREE.BoxGeometry(jambThick, doorHeight, jambDepth);
+          leftJambGeom.computeVertexNormals();
+          const leftJamb = new THREE.Mesh(leftJambGeom, windowFrameMaterial);
+          leftJamb.position.set(-opWidth / 2 + jambThick / 2, doorHeight / 2, 0);
+          leftJamb.castShadow = true;
+          doorGroup.add(leftJamb);
+
+          const rightJambGeom = new THREE.BoxGeometry(jambThick, doorHeight, jambDepth);
+          rightJambGeom.computeVertexNormals();
+          const rightJamb = new THREE.Mesh(rightJambGeom, windowFrameMaterial);
+          rightJamb.position.set(opWidth / 2 - jambThick / 2, doorHeight / 2, 0);
+          rightJamb.castShadow = true;
+          doorGroup.add(rightJamb);
+
+          // Two Overlapping Sliding Panels (引違いパネル)
+          const panelWidth = opWidth / 2 + 0.05;
+          const panelHeight = doorHeight - 0.08;
+          const panelThick = 0.032;
+
+          // Helper to create a framed sliding sash panel with frosted/clear glass insert
+          const createSlidingPanel = (name: string, offsetX: number, offsetZ: number) => {
+            const panel = new THREE.Group();
+            panel.name = name;
+            panel.position.set(offsetX, panelHeight / 2 + 0.01, offsetZ);
+
+            // Perimeter sash frame
+            const frameOuter = new THREE.Mesh(
+              new THREE.BoxGeometry(panelWidth, panelHeight, panelThick),
+              windowFrameMaterial
+            );
+            frameOuter.castShadow = true;
+            panel.add(frameOuter);
+
+            // Center semi-transparent glass insert
+            const glassGeom = new THREE.BoxGeometry(panelWidth - 0.12, panelHeight - 0.12, 0.012);
+            glassGeom.computeVertexNormals();
+            const glassPane = new THREE.Mesh(glassGeom, glassMaterial);
+            glassPane.castShadow = false;
+            glassPane.receiveShadow = false;
+            panel.add(glassPane);
+
+            // Vertical flush pull handle
+            const pullGeom = new THREE.BoxGeometry(0.02, 0.15, panelThick + 0.008);
+            pullGeom.computeVertexNormals();
+            const pull = new THREE.Mesh(pullGeom, doorHandleMaterial);
+            pull.position.set(
+              offsetX < 0 ? panelWidth / 2 - 0.05 : -panelWidth / 2 + 0.05,
+              0,
+              0
+            );
+            pull.castShadow = true;
+            panel.add(pull);
+
+            return panel;
+          };
+
+          // Panel 1: front offset
+          const panel1 = createSlidingPanel(
+            `SlidingPanel_Front_${op.id}`,
+            -opWidth / 4 + 0.02,
+            0.022
+          );
+          doorGroup.add(panel1);
+
+          // Panel 2: back offset
+          const panel2 = createSlidingPanel(
+            `SlidingPanel_Back_${op.id}`,
+            opWidth / 4 - 0.02,
+            -0.022
+          );
+          doorGroup.add(panel2);
+
+          wallsGroup.add(doorGroup);
         } else if (op.type === 'window') {
+          // WINDOW (引違い窓: Sill wall below, Lintel wall above, 3D extruded frame, mullion, blue glass pane)
           // 1. Sill wall below window
           const sillSeg = [
             {
@@ -571,6 +849,7 @@ export function build3DArchitecturalModel({
             },
           ];
           const sillGroup = generate3DFrom2DWalls(sillSeg);
+          sillGroup.name = `WallSill_Window_${op.id}`;
           wallsGroup.add(sillGroup);
 
           // 2. Lintel wall above window
@@ -587,36 +866,76 @@ export function build3DArchitecturalModel({
             ];
             const lintelGroup = generate3DFrom2DWalls(lintelSeg);
             lintelGroup.position.y = windowTopHeight;
+            lintelGroup.name = `WallHeader_Window_${op.id}`;
             wallsGroup.add(lintelGroup);
           }
 
-          // 3. Window frame & glass pane
-          const winWidth = Math.hypot(opP2.x - opP1.x, opP2.z - opP1.z);
+          // 3. 3D Architectural Window Assembly
+          const winWidth = opWidth;
           const winHeight = windowTopHeight - windowSillHeight;
           const winGroup = new THREE.Group();
+          winGroup.name = `WindowAssembly_${op.id}`;
+          winGroup.position.set(midX, windowSillHeight + winHeight / 2, midZ);
+          winGroup.rotation.y = wallAngle;
 
-          // Glass pane
-          const glassGeom = new THREE.BoxGeometry(winWidth - 0.08, winHeight - 0.08, 0.012);
+          const frameThick = 0.04;
+          const frameDepth = thickness + 0.02;
+
+          // Solid 3D Outer Aluminum Frame Rails & Stiles (real solid meshes for PBR & GLB export)
+          // Top Rail
+          const topRailGeom = new THREE.BoxGeometry(winWidth, frameThick, frameDepth);
+          topRailGeom.computeVertexNormals();
+          const topRail = new THREE.Mesh(topRailGeom, windowFrameMaterial);
+          topRail.position.set(0, winHeight / 2 - frameThick / 2, 0);
+          topRail.castShadow = true;
+          winGroup.add(topRail);
+
+          // Bottom Rail
+          const bottomRailGeom = new THREE.BoxGeometry(winWidth, frameThick, frameDepth);
+          bottomRailGeom.computeVertexNormals();
+          const bottomRail = new THREE.Mesh(bottomRailGeom, windowFrameMaterial);
+          bottomRail.position.set(0, -winHeight / 2 + frameThick / 2, 0);
+          bottomRail.castShadow = true;
+          winGroup.add(bottomRail);
+
+          // Left Stile
+          const leftStileGeom = new THREE.BoxGeometry(frameThick, winHeight - frameThick * 2, frameDepth);
+          leftStileGeom.computeVertexNormals();
+          const leftStile = new THREE.Mesh(leftStileGeom, windowFrameMaterial);
+          leftStile.position.set(-winWidth / 2 + frameThick / 2, 0, 0);
+          leftStile.castShadow = true;
+          winGroup.add(leftStile);
+
+          // Right Stile
+          const rightStileGeom = new THREE.BoxGeometry(frameThick, winHeight - frameThick * 2, frameDepth);
+          rightStileGeom.computeVertexNormals();
+          const rightStile = new THREE.Mesh(rightStileGeom, windowFrameMaterial);
+          rightStile.position.set(winWidth / 2 - frameThick / 2, 0, 0);
+          rightStile.castShadow = true;
+          winGroup.add(rightStile);
+
+          // Center Vertical Mullion Sash Divider
+          const mullionGeom = new THREE.BoxGeometry(0.03, winHeight - frameThick * 2, frameDepth - 0.01);
+          mullionGeom.computeVertexNormals();
+          const mullion = new THREE.Mesh(mullionGeom, windowFrameMaterial);
+          mullion.position.set(0, 0, 0);
+          mullion.castShadow = true;
+          mullion.name = `WindowMullion_${op.id}`;
+          winGroup.add(mullion);
+
+          // Semi-transparent Blue Glass Pane
+          const glassGeom = new THREE.BoxGeometry(
+            winWidth - frameThick * 2 - 0.01,
+            winHeight - frameThick * 2 - 0.01,
+            0.014
+          );
+          glassGeom.computeVertexNormals();
           const glass = new THREE.Mesh(glassGeom, glassMaterial);
           glass.castShadow = false;
           glass.receiveShadow = false;
-
-          // Anthracite aluminum window frame
-          const frameGeom = new THREE.BoxGeometry(winWidth, winHeight, thickness + 0.02);
-          // Hollow frame via wireframe/box or outer frame
-          const frameEdges = new THREE.EdgesGeometry(frameGeom);
-          const frameLines = new THREE.LineSegments(
-            frameEdges,
-            new THREE.LineBasicMaterial({ color: 0x1e293b, linewidth: 2 })
-          );
-
+          glass.name = `WindowGlass_${op.id}`;
           winGroup.add(glass);
-          winGroup.add(frameLines);
 
-          const midX = (opP1.x + opP2.x) / 2;
-          const midZ = (opP1.z + opP2.z) / 2;
-          winGroup.position.set(midX, windowSillHeight + winHeight / 2, midZ);
-          winGroup.rotation.y = Math.atan2(-dz, dx);
           wallsGroup.add(winGroup);
         }
 

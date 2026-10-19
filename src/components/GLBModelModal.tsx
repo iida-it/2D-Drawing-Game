@@ -17,6 +17,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { loadGLBFromFile, createArchitecturalProp } from '../utils/glbLoader';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface GLBModelModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
   onModelLoaded,
   onShowToast,
 }) => {
+  const { t } = useLanguage();
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadedModel, setLoadedModel] = useState<THREE.Group | null>(null);
@@ -128,14 +130,14 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-slate-900 text-sm">
-                  Import 3D Model (.GLB / .GLTF)
+                  {t('import3DModelModalTitle')}
                 </h3>
                 <span className="text-[10px] font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
-                  Native GLTFLoader
+                  {t('nativeGLTFLoader')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500">
-                Load binary 3D models with automatic ground alignment & transform gizmo
+                {t('import3DModelModalSub')}
               </p>
             </div>
           </div>
@@ -179,7 +181,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
               <div className="flex flex-col items-center gap-2 py-4">
                 <Loader2 className="w-8 h-8 text-sky-600 animate-spin" />
                 <span className="text-xs font-semibold text-slate-700">
-                  Parsing & Normalizing 3D Model...
+                  {t('parsingNormalizing')}
                 </span>
               </div>
             ) : (
@@ -189,10 +191,10 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-slate-800">
-                    Click to browse or Drag & Drop <span className="text-sky-600 font-mono">.glb / .gltf</span>
+                    {t('dragDropTitle')}
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Standard binary glTF 2.0 3D models (furniture, fixtures, decor)
+                    {t('dragDropSub')}
                   </p>
                 </div>
               </div>
@@ -203,7 +205,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
           <div>
             <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2">
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Or Choose an Architectural Prop Preset:</span>
+              <span>{t('propPresetsTitle')}</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
@@ -214,7 +216,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
                 <div className="p-2 rounded-lg bg-slate-100 text-slate-700 group-hover:bg-sky-100 group-hover:text-sky-700 transition-colors">
                   <Armchair className="w-5 h-5" />
                 </div>
-                <span className="text-xs font-semibold text-slate-800">Armchair</span>
+                <span className="text-xs font-semibold text-slate-800">{t('presetArmchair')}</span>
                 <span className="text-[10px] text-slate-400">0.8m x 0.7m</span>
               </button>
 
@@ -226,7 +228,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
                 <div className="p-2 rounded-lg bg-slate-100 text-slate-700 group-hover:bg-sky-100 group-hover:text-sky-700 transition-colors">
                   <Table className="w-5 h-5" />
                 </div>
-                <span className="text-xs font-semibold text-slate-800">Dining Table</span>
+                <span className="text-xs font-semibold text-slate-800">{t('presetDiningTable')}</span>
                 <span className="text-[10px] text-slate-400">1.6m x 0.9m</span>
               </button>
 
@@ -238,7 +240,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
                 <div className="p-2 rounded-lg bg-slate-100 text-slate-700 group-hover:bg-sky-100 group-hover:text-sky-700 transition-colors">
                   <Flower2 className="w-5 h-5" />
                 </div>
-                <span className="text-xs font-semibold text-slate-800">Fiddle Leaf</span>
+                <span className="text-xs font-semibold text-slate-800">{t('presetFiddleLeaf')}</span>
                 <span className="text-[10px] text-slate-400">0.5m x 1.2m</span>
               </button>
 
@@ -250,7 +252,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
                 <div className="p-2 rounded-lg bg-slate-100 text-slate-700 group-hover:bg-sky-100 group-hover:text-sky-700 transition-colors">
                   <Lamp className="w-5 h-5" />
                 </div>
-                <span className="text-xs font-semibold text-slate-800">Floor Lamp</span>
+                <span className="text-xs font-semibold text-slate-800">{t('presetFloorLamp')}</span>
                 <span className="text-[10px] text-slate-400">0.4m x 1.8m</span>
               </button>
             </div>
@@ -273,19 +275,19 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
 
               <div className="grid grid-cols-3 gap-2 text-center text-xs">
                 <div className="bg-white/80 p-2 rounded-lg border border-sky-100">
-                  <div className="text-[10px] text-slate-400 uppercase font-bold">Bounding Box</div>
+                  <div className="text-[10px] text-slate-400 uppercase font-bold">{t('boundingBox')}</div>
                   <div className="font-mono font-bold text-sky-800 text-xs">
                     {modelStats.size.x.toFixed(2)}m × {modelStats.size.y.toFixed(2)}m × {modelStats.size.z.toFixed(2)}m
                   </div>
                 </div>
                 <div className="bg-white/80 p-2 rounded-lg border border-sky-100">
-                  <div className="text-[10px] text-slate-400 uppercase font-bold">Vertices</div>
+                  <div className="text-[10px] text-slate-400 uppercase font-bold">{t('vertices')}</div>
                   <div className="font-mono font-bold text-slate-700 text-xs">
                     {modelStats.vertices.toLocaleString()}
                   </div>
                 </div>
                 <div className="bg-white/80 p-2 rounded-lg border border-sky-100">
-                  <div className="text-[10px] text-slate-400 uppercase font-bold">Faces</div>
+                  <div className="text-[10px] text-slate-400 uppercase font-bold">{t('faces')}</div>
                   <div className="font-mono font-bold text-slate-700 text-xs">
                     {modelStats.faces.toLocaleString()}
                   </div>
@@ -294,7 +296,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
 
               <div className="text-[11px] text-sky-700 flex items-center gap-1.5 pt-1">
                 <CheckCircle2 className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                <span>Centered at origin and placed flush on ground level (y = 0) with shadows enabled.</span>
+                <span>{t('groundAlignedSuccess')}</span>
               </div>
             </div>
           )}
@@ -311,7 +313,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
         {/* Footer Actions */}
         <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-200/80 bg-slate-50/70">
           <span className="text-[11px] text-slate-400">
-            Interactive 3D transform gizmo will activate on placement
+            {t('transformGizmoNotice')}
           </span>
 
           <div className="flex items-center gap-2">
@@ -319,7 +321,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
               onClick={onClose}
               className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-xl transition-colors"
             >
-              Cancel
+              {t('cancel')}
             </button>
 
             <button
@@ -327,7 +329,7 @@ export const GLBModelModal: React.FC<GLBModelModalProps> = ({
               disabled={!loadedModel}
               className="flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-200 transition-all hover:scale-[1.02] active:scale-95 disabled:hover:scale-100 disabled:shadow-none"
             >
-              <span>Add to 3D Scene</span>
+              <span>{t('addTo3DScene')}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
