@@ -322,13 +322,27 @@ export const ProceduralScriptModal: React.FC<ProceduralScriptModalProps> = ({
               ) : (
                 <div className="bg-rose-50/90 border border-rose-200 rounded-xl p-3.5 text-xs text-rose-900 flex items-start gap-3 shadow-2xs">
                   <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                  <div className="space-y-1 overflow-hidden">
+                  <div className="space-y-1.5 overflow-hidden w-full">
                     <div className="font-semibold text-rose-950">
                       Transpilation or Execution Error
                     </div>
                     <p className="font-mono text-[11px] text-rose-700 whitespace-pre-wrap break-words">
                       {executionResult.error}
                     </p>
+
+                    {executionResult.error?.includes('No 3D model produced') && (
+                      <div className="mt-2 bg-amber-50 text-amber-900 border border-amber-200/90 rounded-lg p-2.5 text-[11px] space-y-1">
+                        <div className="font-semibold flex items-center gap-1.5 text-amber-950">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Supported 3D Output Patterns:</span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-0.5 text-amber-800 font-mono text-[10px]">
+                          <li>return myGroup; (or return new THREE.Mesh(...);)</li>
+                          <li>scene.add(myMesh); (or scene.add(myGroup);)</li>
+                          <li>export default function(THREE, scene) &#123; return myGroup; &#125;</li>
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

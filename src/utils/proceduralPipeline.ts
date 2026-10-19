@@ -22,6 +22,38 @@ export interface ExecutionResult {
 }
 
 /**
+ * 1. Strip 'import * as THREE from "three";' and ES module export keywords before executing in Sucrase
+ * to prevent module evaluation errors.
+ */
+export function preprocessProceduralTypeScript(rawCode: string): string {
+  let cleaned = rawCode;
+
+  // 1. Strip import statements targeting 'three' or Three.js variations
+  cleaned = cleaned.replace(
+    /import\s+(?:(?:\*\s+as\s+\w+)|(?:\{\s*[\s\S]*?\s*\})|(?:\w+))\s+from\s+['"][^'"]+['"];?/g,
+    ''
+  );
+  cleaned = cleaned.replace(/import\s+type\s+[\s\S]*?from\s+['"][^'"]+['"];?/g, '');
+  cleaned = cleaned.replace(/import\s+['"][^'"]+['"];?/g, '');
+
+  // 2. Normalize and strip ES module export keywords
+  // 'export default function ...' -> 'var __defaultExport = function ...'
+  cleaned = cleaned.replace(/export\s+default\s+function\s*/g, 'var __defaultExport = function ');
+  // 'export default class ...' -> 'var __defaultExport = class ...'
+  cleaned = cleaned.replace(/export\s+default\s+class\s+([a-zA-Z0-9_$]+)/g, 'var __defaultExport = class $1');
+  // 'export default <expr>' -> 'var __defaultExport = <expr>'
+  cleaned = cleaned.replace(/export\s+default\s+/g, 'var __defaultExport = ');
+
+  // Strip 'export' prefix from declarations: export function, export const, export let, export var, export class
+  cleaned = cleaned.replace(/export\s+(function|class|const|let|var|type|interface)\s+/g, '$1 ');
+
+  // Strip named export blocks: export { a, b, c };
+  cleaned = cleaned.replace(/export\s*\{[\s\S]*?\};?/g, '');
+
+  return cleaned;
+}
+
+/**
  * 2. Transpile the TypeScript code into JavaScript in-browser using Sucrase.
  */
 export function transpileTypeScript(tsCode: string): TranspileResult {
@@ -33,8 +65,11 @@ export function transpileTypeScript(tsCode: string): TranspileResult {
   }
 
   try {
-    const result = transform(tsCode, {
-      transforms: ['typescript', 'imports'],
+    // 1. Preprocess: strip Three.js imports and export keywords before Sucrase transformation
+    const preprocessed = preprocessProceduralTypeScript(tsCode);
+
+    const result = transform(preprocessed, {
+      transforms: ['typescript'],
       filePath: 'procedural-model.ts',
     });
 
@@ -67,7 +102,7 @@ export function transpileTypeScript(tsCode: string): TranspileResult {
 }
 
 /**
- * Executes transpiled JS inside a Sandboxed Iframe (fallback for environments blocking Web Workers)
+ * Executes transpiled JS inside a Sandboxed Iframe (fallback for environments blocking Web Workers).
  * Sandboxed with `allow-scripts` (without `allow-same-origin`), guaranteeing no access to cookies,
  * localStorage, sessionStorage, or parent DOM.
  */
@@ -125,8 +160,8 @@ function executeInSandboxedIframe(
       reject(new Error(`Execution timed out after ${timeoutMs}ms (infinite loop detected).`));
     }, timeoutMs);
 
-    // Pass Three.js bundle or script inside the sandboxed iframe
-    // Note: strictly strips cookies, localStorage, and parent DOM access
+    // Pass Three.js bundle inside the sandboxed iframe
+    // Checks multiple output conventions: return object, export function, or scene.add(mesh)
     const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -136,7 +171,7 @@ function executeInSandboxedIframe(
 <body>
 <script>
   (function() {
-    // Security hardening: delete sensitive APIs
+    // Security hardening: delete sensitive storage and network APIs
     try {
       delete window.localStorage;
       delete window.sessionStorage;
@@ -157,12 +192,27 @@ function executeInSandboxedIframe(
 
         var sandboxFunc = new Function(
           'THREE', 'scene', 'require', 'exports', 'module',
-          '"use strict";\\n' + jsCode + '\\n' +
-          'if (typeof exports.default === "function") return exports.default(THREE, scene);' +
-          'if (typeof exports.createModel === "function") return exports.createModel(THREE, scene);' +
-          'if (typeof createModel === "function") return createModel(THREE, scene);' +
-          'if (scene.children.length > 0) return scene;' +
-          'return exports.default || exports.model || module.exports;'
+          '"use strict";\\n' +
+          'const { Group, Mesh, BufferGeometry, BoxGeometry, SphereGeometry, CylinderGeometry, TorusGeometry, TorusKnotGeometry, PlaneGeometry, ConeGeometry, RingGeometry, ExtrudeGeometry, ShapeGeometry, Shape, Path, Vector2, Vector3, Matrix4, Euler, Quaternion, Color, MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, MeshLambertMaterial, DoubleSide, FrontSide, BackSide } = THREE;\\n' +
+          'var __defaultExport = undefined;\\n' +
+          jsCode + ';\\n' +
+          'if (typeof __defaultExport === "function") return __defaultExport(THREE, scene);\\n' +
+          'if (__defaultExport !== undefined) return __defaultExport;\\n' +
+          'if (typeof exports.default === "function") return exports.default(THREE, scene);\\n' +
+          'if (exports.default !== undefined) return exports.default;\\n' +
+          'if (typeof exports.createModel === "function") return exports.createModel(THREE, scene);\\n' +
+          'if (typeof module.exports === "function") return module.exports(THREE, scene);\\n' +
+          'if (module.exports && module.exports !== exports) return module.exports;\\n' +
+          'if (typeof createModel === "function") return createModel(THREE, scene);\\n' +
+          'if (typeof createScene === "function") return createScene(THREE, scene);\\n' +
+          'if (typeof createMesh === "function") return createMesh(THREE, scene);\\n' +
+          'if (scene && scene.children && scene.children.length > 0) {\\n' +
+          '  if (scene.children.length === 1) return scene.children[0];\\n' +
+          '  var grp = new THREE.Group(); grp.name = "SceneExportedGroup";\\n' +
+          '  while (scene.children.length > 0) grp.add(scene.children[0]);\\n' +
+          '  return grp;\\n' +
+          '}\\n' +
+          'return null;'
         );
 
         var mockRequire = function(id) {
@@ -171,12 +221,25 @@ function executeInSandboxedIframe(
         };
 
         var result = sandboxFunc(THREE, mockScene, mockRequire, moduleExports, moduleObj);
-        var exportable = (result instanceof THREE.Object3D) ? result :
-                         (result instanceof THREE.BufferGeometry) ? new THREE.Mesh(result, new THREE.MeshStandardMaterial({ color: 0x0284c7 })) :
-                         (mockScene.children.length > 0) ? mockScene : null;
+        var exportable = null;
+
+        if (result instanceof THREE.Object3D) {
+          exportable = result;
+        } else if (result instanceof THREE.BufferGeometry) {
+          exportable = new THREE.Mesh(result, new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4, metalness: 0.2 }));
+        } else if (mockScene && mockScene.children.length > 0) {
+          if (mockScene.children.length === 1) {
+            exportable = mockScene.children[0];
+          } else {
+            var g = new THREE.Group();
+            g.name = "MockSceneGroup";
+            while (mockScene.children.length > 0) g.add(mockScene.children[0]);
+            exportable = g;
+          }
+        }
 
         if (!exportable) {
-          throw new Error("Procedural script did not return or add a THREE.Mesh, THREE.Group, or THREE.BufferGeometry.");
+          throw new Error("No 3D model produced. Please either return a THREE.Mesh or THREE.Group (e.g. 'return myGroup;'), export a function (e.g. 'export default function() { return myGroup; }'), or call 'scene.add(mesh);' in your procedural script.");
         }
 
         var serialized = exportable.toJSON();
@@ -337,12 +400,16 @@ export async function executeProceduralScript(
 
 /**
  * Built-in Architectural Procedural Script Presets
+ * Highlights diverse return styles:
+ * 1. Export default function
+ * 2. Direct 'return object'
+ * 3. 'scene.add(mesh)'
  */
 export const PROCEDURAL_PRESETS = [
   {
     id: 'spiral-staircase',
     name: 'Helical Spiral Staircase',
-    description: 'Central column, teak wood cantilevered steps, and helical bronze handrail',
+    description: 'Central column, teak wood cantilevered steps, and helical bronze handrail (export default)',
     code: `import * as THREE from 'three';
 
 /**
@@ -417,175 +484,167 @@ export default function createSpiralStaircase(THREE: any) {
   {
     id: 'architectural-pavilion',
     name: 'Modern Slatted Pavilion',
-    description: 'Parametric cedar slatted pergola with steel perimeter frame',
+    description: 'Parametric cedar slatted pergola with steel perimeter frame (scene.add)',
     code: `import * as THREE from 'three';
 
 /**
  * Modern Architectural Slatted Pavilion
- * Parametric outdoor shade structure with timber louvers and steel columns.
+ * Adds a shade structure with timber louvers and steel columns using scene.add().
  */
-export default function createPavilion(THREE: any) {
-  const pavilion = new THREE.Group();
-  pavilion.name = "ModernPergolaPavilion";
+const pavilion = new THREE.Group();
+pavilion.name = "ModernPergolaPavilion";
 
-  const width = 4.0;
-  const length = 4.0;
-  const height = 2.8;
+const width = 4.0;
+const length = 4.0;
+const height = 2.8;
 
-  const steelMat = new THREE.MeshStandardMaterial({
-    color: 0x0f172a,
-    roughness: 0.35,
-    metalness: 0.7,
-  });
+const steelMat = new THREE.MeshStandardMaterial({
+  color: 0x0f172a,
+  roughness: 0.35,
+  metalness: 0.7,
+});
 
-  const cedarMat = new THREE.MeshStandardMaterial({
-    color: 0xb45309,
-    roughness: 0.55,
-    metalness: 0.05,
-  });
+const cedarMat = new THREE.MeshStandardMaterial({
+  color: 0xb45309,
+  roughness: 0.55,
+  metalness: 0.05,
+});
 
-  // 4 Corner Columns
-  const colGeom = new THREE.BoxGeometry(0.14, height, 0.14);
-  const corners = [
-    [-width / 2, -length / 2],
-    [width / 2, -length / 2],
-    [-width / 2, length / 2],
-    [width / 2, length / 2],
-  ];
+// 4 Corner Columns
+const colGeom = new THREE.BoxGeometry(0.14, height, 0.14);
+const corners = [
+  [-width / 2, -length / 2],
+  [width / 2, -length / 2],
+  [-width / 2, length / 2],
+  [width / 2, length / 2],
+];
 
-  corners.forEach(([cx, cz]) => {
-    const col = new THREE.Mesh(colGeom, steelMat);
-    col.position.set(cx, height / 2, cz);
-    pavilion.add(col);
-  });
+corners.forEach(([cx, cz]) => {
+  const col = new THREE.Mesh(colGeom, steelMat);
+  col.position.set(cx, height / 2, cz);
+  pavilion.add(col);
+});
 
-  // Perimeter Roof Beams
-  const beamXGeom = new THREE.BoxGeometry(width + 0.28, 0.2, 0.14);
-  const beamZGeom = new THREE.BoxGeometry(0.14, 0.2, length + 0.28);
+// Perimeter Roof Beams
+const beamXGeom = new THREE.BoxGeometry(width + 0.28, 0.2, 0.14);
+const beamZGeom = new THREE.BoxGeometry(0.14, 0.2, length + 0.28);
 
-  const beamN = new THREE.Mesh(beamXGeom, steelMat);
-  beamN.position.set(0, height, -length / 2);
-  pavilion.add(beamN);
+const beamN = new THREE.Mesh(beamXGeom, steelMat);
+beamN.position.set(0, height, -length / 2);
+pavilion.add(beamN);
 
-  const beamS = new THREE.Mesh(beamXGeom, steelMat);
-  beamS.position.set(0, height, length / 2);
-  pavilion.add(beamS);
+const beamS = new THREE.Mesh(beamXGeom, steelMat);
+beamS.position.set(0, height, length / 2);
+pavilion.add(beamS);
 
-  const beamW = new THREE.Mesh(beamZGeom, steelMat);
-  beamW.position.set(-width / 2, height, 0);
-  pavilion.add(beamW);
+const beamW = new THREE.Mesh(beamZGeom, steelMat);
+beamW.position.set(-width / 2, height, 0);
+pavilion.add(beamW);
 
-  const beamE = new THREE.Mesh(beamZGeom, steelMat);
-  beamE.position.set(width / 2, height, 0);
-  pavilion.add(beamE);
+const beamE = new THREE.Mesh(beamZGeom, steelMat);
+beamE.position.set(width / 2, height, 0);
+pavilion.add(beamE);
 
-  // Louvers
-  const louverCount = 20;
-  const louverGeom = new THREE.BoxGeometry(width - 0.1, 0.14, 0.04);
-  const spacing = (length - 0.4) / (louverCount - 1);
+// Louvers
+const louverCount = 20;
+const louverGeom = new THREE.BoxGeometry(width - 0.1, 0.14, 0.04);
+const spacing = (length - 0.4) / (louverCount - 1);
 
-  for (let i = 0; i < louverCount; i++) {
-    const louver = new THREE.Mesh(louverGeom, cedarMat);
-    const z = -length / 2 + 0.2 + i * spacing;
-    louver.position.set(0, height + 0.08, z);
-    louver.rotation.x = Math.PI / 6; // 30-degree sun angle tilt
-    pavilion.add(louver);
-  }
-
-  return pavilion;
+for (let i = 0; i < louverCount; i++) {
+  const louver = new THREE.Mesh(louverGeom, cedarMat);
+  const z = -length / 2 + 0.2 + i * spacing;
+  louver.position.set(0, height + 0.08, z);
+  louver.rotation.x = Math.PI / 6; // 30-degree sun angle tilt
+  pavilion.add(louver);
 }
+
+// Add directly to mock scene
+scene.add(pavilion);
 `,
   },
   {
     id: 'roman-fluted-column',
     name: 'Classical Fluted Column',
-    description: 'Fluted marble shaft with molded base and Doric abacus capital',
+    description: 'Fluted marble shaft with molded base and Doric abacus capital (direct return)',
     code: `import * as THREE from 'three';
 
 /**
  * Classical Fluted Architectural Column
- * Precision procedural fluted shaft with capital and plinth.
+ * Uses direct 'return column;' convention.
  */
-export default function createFlutedColumn(THREE: any) {
-  const column = new THREE.Group();
-  column.name = "ClassicalFlutedColumn";
+const column = new THREE.Group();
+column.name = "ClassicalFlutedColumn";
 
-  const marbleMat = new THREE.MeshStandardMaterial({
-    color: 0xf8fafc,
-    roughness: 0.25,
-    metalness: 0.1,
-  });
+const marbleMat = new THREE.MeshStandardMaterial({
+  color: 0xf8fafc,
+  roughness: 0.25,
+  metalness: 0.1,
+});
 
-  // Square Plinth (Pedestal Base)
-  const baseGeom = new THREE.BoxGeometry(0.9, 0.2, 0.9);
-  const base = new THREE.Mesh(baseGeom, marbleMat);
-  base.position.y = 0.1;
-  column.add(base);
+// Square Plinth (Pedestal Base)
+const baseGeom = new THREE.BoxGeometry(0.9, 0.2, 0.9);
+const base = new THREE.Mesh(baseGeom, marbleMat);
+base.position.y = 0.1;
+column.add(base);
 
-  // Molded Torus Ring
-  const torusGeom = new THREE.CylinderGeometry(0.38, 0.42, 0.12, 32);
-  const torus = new THREE.Mesh(torusGeom, marbleMat);
-  torus.position.y = 0.26;
-  column.add(torus);
+// Molded Torus Ring
+const torusGeom = new THREE.CylinderGeometry(0.38, 0.42, 0.12, 32);
+const torus = new THREE.Mesh(torusGeom, marbleMat);
+torus.position.y = 0.26;
+column.add(torus);
 
-  // Fluted Shaft using LatheGeometry or Cylinder
-  const shaftHeight = 2.4;
-  const shaftRadius = 0.32;
-  const shaftGeom = new THREE.CylinderGeometry(shaftRadius * 0.9, shaftRadius, shaftHeight, 20);
-  const shaft = new THREE.Mesh(shaftGeom, marbleMat);
-  shaft.position.y = 0.32 + shaftHeight / 2;
-  column.add(shaft);
+// Fluted Shaft
+const shaftHeight = 2.4;
+const shaftRadius = 0.32;
+const shaftGeom = new THREE.CylinderGeometry(shaftRadius * 0.9, shaftRadius, shaftHeight, 20);
+const shaft = new THREE.Mesh(shaftGeom, marbleMat);
+shaft.position.y = 0.32 + shaftHeight / 2;
+column.add(shaft);
 
-  // Capital (Neck & Abacus)
-  const neckGeom = new THREE.CylinderGeometry(0.38, 0.3, 0.12, 32);
-  const neck = new THREE.Mesh(neckGeom, marbleMat);
-  neck.position.y = 0.32 + shaftHeight + 0.06;
-  column.add(neck);
+// Capital (Neck & Abacus)
+const neckGeom = new THREE.CylinderGeometry(0.38, 0.3, 0.12, 32);
+const neck = new THREE.Mesh(neckGeom, marbleMat);
+neck.position.y = 0.32 + shaftHeight + 0.06;
+column.add(neck);
 
-  const abacusGeom = new THREE.BoxGeometry(0.85, 0.16, 0.85);
-  const abacus = new THREE.Mesh(abacusGeom, marbleMat);
-  abacus.position.y = 0.32 + shaftHeight + 0.2;
-  column.add(abacus);
+const abacusGeom = new THREE.BoxGeometry(0.85, 0.16, 0.85);
+const abacus = new THREE.Mesh(abacusGeom, marbleMat);
+abacus.position.y = 0.32 + shaftHeight + 0.2;
+column.add(abacus);
 
-  return column;
-}
+// Direct return output convention
+return column;
 `,
   },
   {
     id: 'custom-template',
     name: 'Blank TypeScript Model Template',
-    description: 'Starter template with typed THREE parameters and instructions',
+    description: 'Starter template with multiple output pattern choices',
     code: `import * as THREE from 'three';
 
 /**
  * Custom Procedural Three.js Model
- * @param THREE The Three.js library instance
- * @param scene The mock architectural scene context
- * @returns THREE.Mesh, THREE.Group, or THREE.BufferGeometry
+ * Supported output conventions:
+ * 1. Direct return: 'return mesh;' or 'return group;'
+ * 2. Scene addition: 'scene.add(mesh);'
+ * 3. Exported function: 'export default function(THREE, scene) { return group; }'
  */
-export default function createModel(THREE: any, scene: any) {
-  // 1. Create a root group or mesh
-  const model = new THREE.Group();
-  model.name = "MyProceduralModel";
 
-  // 2. Define custom procedural geometry
-  const geometry = new THREE.TorusKnotGeometry(0.8, 0.25, 120, 16);
+// 1. Create geometry and material
+const geometry = new THREE.TorusKnotGeometry(0.8, 0.25, 120, 16);
+const material = new THREE.MeshStandardMaterial({
+  color: 0x0284c7, // Azure
+  roughness: 0.3,
+  metalness: 0.8,
+});
 
-  // 3. Define PBR architectural material
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x0284c7, // Vibrant azure
-    roughness: 0.3,
-    metalness: 0.8,
-  });
+// 2. Construct mesh
+const mesh = new THREE.Mesh(geometry, material);
+mesh.position.y = 1.2;
+mesh.castShadow = true;
 
-  // 4. Construct mesh and position upright on floor
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.y = 1.2;
-  mesh.castShadow = true;
-  model.add(mesh);
-
-  return model;
-}
+// 3. Return directly (or call scene.add(mesh))
+return mesh;
 `,
   },
 ];
