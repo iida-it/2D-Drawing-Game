@@ -262,12 +262,18 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
           <div className="bg-sky-50/80 rounded-xl p-3 border border-sky-300 shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-sky-900 flex items-center gap-1.5">
-                {selectedOpening.type === 'door' ? (
+                {selectedOpening.type === 'door' || selectedOpening.type === 'double-door' ? (
                   <DoorOpen className="w-4 h-4 text-sky-600" />
                 ) : (
                   <AppWindow className="w-4 h-4 text-sky-600" />
                 )}
-                {selectedOpening.type === 'door' ? 'Door Opening' : 'Window Opening'}
+                {selectedOpening.type === 'door'
+                  ? 'Single Door (片開き戸)'
+                  : selectedOpening.type === 'double-door'
+                  ? 'Double Door (両開き戸)'
+                  : selectedOpening.type === 'sliding-door'
+                  ? 'Sliding Door (引違い戸)'
+                  : 'Window (引違い窓)'}
               </span>
               {onDeleteOpening && (
                 <button
@@ -280,6 +286,52 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
               )}
             </div>
 
+            {/* Opening Type Selector */}
+            {onUpdateOpening && (
+              <div>
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                  Symbol Convention
+                </span>
+                <div className="grid grid-cols-4 gap-1">
+                  {(
+                    [
+                      { type: 'door', label: 'Single' },
+                      { type: 'double-door', label: 'Double' },
+                      { type: 'sliding-door', label: 'Sliding' },
+                      { type: 'window', label: 'Window' },
+                    ] as const
+                  ).map((item) => {
+                    const isCur = selectedOpening.type === item.type;
+                    return (
+                      <button
+                        key={item.type}
+                        onClick={() =>
+                          onUpdateOpening(selectedOpening.id, {
+                            type: item.type,
+                            widthMeters:
+                              item.type === 'door'
+                                ? 0.85
+                                : item.type === 'double-door'
+                                ? 1.6
+                                : item.type === 'sliding-door'
+                                ? 1.65
+                                : 1.2,
+                          })
+                        }
+                        className={`px-1 py-1 rounded text-[10px] font-semibold text-center border transition-colors ${
+                          isCur
+                            ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Opening Width Presets */}
             <div>
               <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
@@ -287,7 +339,11 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
               </span>
               <div className="grid grid-cols-4 gap-1">
                 {(selectedOpening.type === 'door'
-                  ? [0.7, 0.8, 0.9, 1.0]
+                  ? [0.75, 0.8, 0.85, 0.9]
+                  : selectedOpening.type === 'double-door'
+                  ? [1.4, 1.6, 1.8, 2.0]
+                  : selectedOpening.type === 'sliding-door'
+                  ? [1.2, 1.5, 1.65, 1.8]
                   : [0.9, 1.2, 1.5, 1.8]
                 ).map((w) => {
                   const isCurrent = Math.abs(selectedOpening.widthMeters - w) < 0.01;
@@ -309,7 +365,7 @@ export const RightInspectorHUD: React.FC<RightInspectorHUDProps> = ({
             </div>
 
             {/* Door Swing Controls */}
-            {selectedOpening.type === 'door' && onUpdateOpening && (
+            {(selectedOpening.type === 'door' || selectedOpening.type === 'double-door') && onUpdateOpening && (
               <div className="pt-2 border-t border-sky-200/60 flex items-center justify-between gap-2">
                 <button
                   onClick={() =>

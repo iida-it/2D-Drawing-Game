@@ -3,6 +3,7 @@ import {
   Node,
   Wall,
   WallOpening,
+  OpeningType,
   ToolType,
   BlueprintLevel,
   DraftingSettings,
@@ -175,15 +176,23 @@ export default function App() {
     [nodes, walls, openings, settings.wallThicknessMeters, pushHistory]
   );
 
-  // Add Opening (Door or Window)
+  // Add Opening (Single Door, Double Door, Sliding Door, Window)
   const handleAddOpening = useCallback(
     (
       wallId: string,
-      type: 'door' | 'window',
+      type: OpeningType,
       positionRatio: number,
       widthMeters?: number
     ) => {
-      const defaultWidth = type === 'door' ? 0.9 : 1.2;
+      const defaultWidth =
+        type === 'door'
+          ? 0.85
+          : type === 'double-door'
+          ? 1.60
+          : type === 'sliding-door'
+          ? 1.65
+          : 1.20;
+
       const newOpening: WallOpening = {
         id: `op-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         wallId,
@@ -199,10 +208,18 @@ export default function App() {
       setSelectedOpeningId(newOpening.id);
       pushHistory(nodes, walls, newOpenings);
       soundEngine.playPencilClick();
-      setToastNotification(
+
+      const label =
         type === 'door'
-          ? `🚪 Door opening (${(widthMeters || defaultWidth).toFixed(2)}m) placed on wall.`
-          : `🪟 Window opening (${(widthMeters || defaultWidth).toFixed(2)}m) placed on wall.`
+          ? '🚪 Single Door (片開き戸)'
+          : type === 'double-door'
+          ? '🚪 Double Door (両開き戸)'
+          : type === 'sliding-door'
+          ? '🪟 Sliding Door (引違い戸)'
+          : '🪟 Window (引違い窓)';
+
+      setToastNotification(
+        `${label} (${(widthMeters || defaultWidth).toFixed(2)}m) placed on wall.`
       );
     },
     [openings, nodes, walls, pushHistory]
@@ -441,11 +458,19 @@ export default function App() {
       if (e.key === 'w' || e.key === 'W') setActiveTool('wall');
       if (e.key === 'd' || e.key === 'D') {
         setActiveTool('door');
-        setToastNotification('🚪 Door Opening Tool: Hover over any wall to snap a door opening.');
+        setToastNotification('🚪 Single Door (片開き戸): Hover over any wall to snap.');
+      }
+      if (e.key === 'b' || e.key === 'B') {
+        setActiveTool('double-door');
+        setToastNotification('🚪 Double Door (両開き戸): Hover over any wall to snap dual swinging doors.');
+      }
+      if (e.key === 'l' || e.key === 'L') {
+        setActiveTool('sliding-door');
+        setToastNotification('🪟 Sliding Door (引違い戸): Hover over any wall to snap Japanese sliding door.');
       }
       if (e.key === 'n' || e.key === 'N') {
         setActiveTool('window');
-        setToastNotification('🪟 Window Opening Tool: Hover over any wall to snap a window opening.');
+        setToastNotification('🪟 Window (引違い窓): Hover over any wall to snap sash window.');
       }
       if (e.key === 'm' || e.key === 'M') setActiveTool('measure');
       if (e.key === 'c' || e.key === 'C') {

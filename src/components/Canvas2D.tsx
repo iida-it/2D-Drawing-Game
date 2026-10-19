@@ -26,6 +26,7 @@ import {
   getWallOpeningsBreakdown,
 } from '../utils/geometry';
 import { soundEngine } from '../utils/audio';
+import { Check, X, Pencil } from 'lucide-react';
 
 interface Canvas2DProps {
   currentLevel: BlueprintLevel;
@@ -129,6 +130,19 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   // Closed rooms for visual fills
   const [closedRooms, setClosedRooms] = useState<ClosedRoom[]>([]);
 
+  // Inline Dimension Editing State
+  const [activeEditingDimension, setActiveEditingDimension] = useState<{
+    wallId: string;
+    startNodeId: string;
+    endNodeId: string;
+    currentLengthMeters: number;
+    badgeWorldPos: Point;
+  } | null>(null);
+  const [dimensionInputValue, setDimensionInputValue] = useState<string>('');
+  const [hoveredDimensionWallId, setHoveredDimensionWallId] = useState<string | null>(null);
+  const dimensionInputRef = useRef<HTMLInputElement | null>(null);
+  const isCancellingRef = useRef<boolean>(false);
+
   // Update closed rooms whenever geometry changes
   useEffect(() => {
     const rooms = detectClosedRooms(nodes, walls, settings.scaleFactor, customRoomTypes);
@@ -156,6 +170,138 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     },
     [pan, zoom]
   );
+
+  // Auto-focus and select dimension input text when editing begins
+  useEffect(() => {
+    if (activeEditingDimension && dimensionInputRef.current) {
+      dimensionInputRef.current.focus();
+      dimensionInputRef.current.select();
+    }
+  }, [activeEditingDimension]);
+
+  // Check if screen coordinates hit any wall dimension label
+  const checkDimensionBadgeClick = useCallback(
+    (screenX: number, screenY: number): {
+      wall: Wall;
+      n1: Node;
+      n2: Node;
+      currentLengthMeters: number;
+      centerWorld: Point;
+    } | null => {
+      const nodeMap = new Map<string, Node>();
+      nodes.forEach((n) => nodeMap.set(n.id, n));
+
+      // Prioritize checking selected wall first
+      const candidateWalls = selectedWallId
+        ? [
+            walls.find((w) => w.id === selectedWallId),
+            ...walls.filter((w) => w.id !== selectedWallId),
+          ].filter(Boolean) as Wall[]
+        : walls;
+
+      for (const w of candidateWalls) {
+        const n1 = nodeMap.get(w.startNodeId);
+        const n2 = nodeMap.get(w.endNodeId);
+        if (!n1 || !n2) continue;
+
+        const dx = n2.x - n1.x;
+        const dy = n2.y - n1.y;
+        const lenPx = Math.hypot(dx, dy);
+        if (lenPx < 1e-4) continue;
+
+        const wallDistMeters = pixelsToMeters(lenPx, settings.scaleFactor);
+        const wallOpenings = openings.filter((o) => o.wallId === w.id);
+        const hasOpenings = wallOpenings.length > 0;
+
+        // Position matches dimension line offset
+        const offsetDist = (hasOpenings ? 36 : 18) / zoom;
+        const nx = -dy / lenPx;
+        const ny = dx / lenPx;
+        const midX = (n1.x + n2.x) / 2;
+        const midY = (n1.y + n2.y) / 2;
+
+        const badgeWorld: Point = {
+          x: midX + nx * offsetDist,
+          y: midY + ny * offsetDist,
+        };
+
+        const badgeScreen = worldToScreen(badgeWorld.x, badgeWorld.y);
+        const distX = Math.abs(screenX - badgeScreen.x);
+        const distY = Math.abs(screenY - badgeScreen.y);
+
+        // Click target area around the badge
+        if (distX <= 48 && distY <= 18) {
+          return {
+            wall: w,
+            n1,
+            n2,
+            currentLengthMeters: wallDistMeters,
+            centerWorld: badgeWorld,
+          };
+        }
+      }
+
+      return null;
+    },
+    [nodes, walls, openings, selectedWallId, settings.scaleFactor, worldToScreen, zoom]
+  );
+
+  // Commit new wall dimension using unit vector scaling formula
+  const handleDimensionSubmit = useCallback(() => {
+    if (!activeEditingDimension) return;
+    if (isCancellingRef.current) {
+      isCancellingRef.current = false;
+      setActiveEditingDimension(null);
+      return;
+    }
+
+    const cleanStr = dimensionInputValue.trim().replace(',', '.').replace(/[^\d.-]/g, '');
+    const newLength = parseFloat(cleanStr);
+    const { startNodeId, endNodeId, currentLengthMeters } = activeEditingDimension;
+
+    const nodeMap = new Map<string, Node>();
+    nodes.forEach((n) => nodeMap.set(n.id, n));
+    const n1 = nodeMap.get(startNodeId);
+    const n2 = nodeMap.get(endNodeId);
+
+    if (
+      n1 &&
+      n2 &&
+      !isNaN(newLength) &&
+      newLength > 0.05 &&
+      newLength < 250 &&
+      currentLengthMeters > 1e-4
+    ) {
+      // Formula specified by user request:
+      // x2_new = x1 + (x2 - x1) / currentLength * newLength
+      // y2_new = y1 + (y2 - y1) / currentLength * newLength
+      const x1 = n1.x;
+      const y1 = n1.y;
+      const x2 = n2.x;
+      const y2 = n2.y;
+
+      const x2_new = x1 + ((x2 - x1) / currentLengthMeters) * newLength;
+      const y2_new = y1 + ((y2 - y1) / currentLengthMeters) * newLength;
+
+      onUpdateNodePosition(endNodeId, { x: x2_new, y: y2_new });
+      soundEngine.playSnapSound();
+    }
+
+    setActiveEditingDimension(null);
+  }, [activeEditingDimension, dimensionInputValue, nodes, onUpdateNodePosition]);
+
+  // Handle key down in inline dimension input
+  const handleDimensionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleDimensionSubmit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      isCancellingRef.current = true;
+      setActiveEditingDimension(null);
+    }
+  };
 
   // Snap calculation for a world point
   const getProcessedPoint = useCallback(
@@ -617,7 +763,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           });
 
           // Dimension pill badge
-          const dimText = formatMeters(wallDistMeters);
+          const isDimHovered = hoveredDimensionWallId === w.id;
+          const isDimEditing = activeEditingDimension?.wallId === w.id;
+          const dimText = isSelected ? `${formatMeters(wallDistMeters)} ✎` : formatMeters(wallDistMeters);
           ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
           const metrics = ctx.measureText(dimText);
           const padX = 6 / zoom;
@@ -627,18 +775,24 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           const badgeX = midX + nx * offsetDist - badgeW / 2;
           const badgeY = midY + ny * offsetDist - badgeH / 2;
 
-          ctx.fillStyle = '#ffffff';
+          ctx.fillStyle = isDimEditing
+            ? 'rgba(255, 255, 255, 0.3)'
+            : isSelected || isDimHovered
+            ? '#f0f9ff'
+            : '#ffffff';
           ctx.beginPath();
           ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3 / zoom);
           ctx.fill();
-          ctx.strokeStyle = isSelected ? '#0284c7' : '#bae6fd';
-          ctx.lineWidth = 1 / zoom;
+          ctx.strokeStyle = isSelected || isDimHovered ? '#0284c7' : '#bae6fd';
+          ctx.lineWidth = (isSelected || isDimHovered ? 1.5 : 1) / zoom;
           ctx.stroke();
 
-          ctx.fillStyle = isSelected ? '#0369a1' : '#0284c7';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(dimText, midX + nx * offsetDist, midY + ny * offsetDist);
+          if (!isDimEditing) {
+            ctx.fillStyle = isSelected || isDimHovered ? '#0369a1' : '#0284c7';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(dimText, midX + nx * offsetDist, midY + ny * offsetDist);
+          }
         }
       } else {
         // Wall broken by openings: architectural door swings, window symbols, and chain dimensions
@@ -920,6 +1074,79 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           ctx.textBaseline = 'middle';
           ctx.fillText(text, dimMid.x, dimMid.y);
         });
+
+        // 4. Overall Total Wall Dimension line & badge when selected or hovered
+        if (isSelected || hoveredDimensionWallId === w.id) {
+          const totalDistPx = getDistance(n1, n2);
+          const totalDistM = pixelsToMeters(totalDistPx, settings.scaleFactor);
+          const totalMidX = (n1.x + n2.x) / 2;
+          const totalMidY = (n1.y + n2.y) / 2;
+          const totalOffset = 36 / zoom;
+          const totalDimP1 = {
+            x: n1.x + breakdown.normal.x * totalOffset,
+            y: n1.y + breakdown.normal.y * totalOffset,
+          };
+          const totalDimP2 = {
+            x: n2.x + breakdown.normal.x * totalOffset,
+            y: n2.y + breakdown.normal.y * totalOffset,
+          };
+
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 1 / zoom;
+          ctx.beginPath();
+          ctx.moveTo(totalDimP1.x, totalDimP1.y);
+          ctx.lineTo(totalDimP2.x, totalDimP2.y);
+          ctx.stroke();
+
+          // End tick marks
+          const tickSize = 4 / zoom;
+          [totalDimP1, totalDimP2].forEach((p) => {
+            ctx.beginPath();
+            ctx.moveTo(
+              p.x - breakdown.unitVec.x * tickSize,
+              p.y - breakdown.unitVec.y * tickSize
+            );
+            ctx.lineTo(
+              p.x + breakdown.unitVec.x * tickSize,
+              p.y + breakdown.unitVec.y * tickSize
+            );
+            ctx.stroke();
+          });
+
+          // Overall Wall Dimension Badge
+          const isDimHovered = hoveredDimensionWallId === w.id;
+          const isDimEditing = activeEditingDimension?.wallId === w.id;
+          const dimText = `${formatMeters(totalDistM)} ✎`;
+          ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+          const metrics = ctx.measureText(dimText);
+          const padX = 6 / zoom;
+          const padY = 3 / zoom;
+          const badgeW = metrics.width + padX * 2;
+          const badgeH = 16 / zoom;
+          const badgeMid = {
+            x: totalMidX + breakdown.normal.x * totalOffset,
+            y: totalMidY + breakdown.normal.y * totalOffset,
+          };
+
+          ctx.fillStyle = isDimEditing
+            ? 'rgba(255, 255, 255, 0.3)'
+            : isDimHovered || isSelected
+            ? '#f0f9ff'
+            : '#ffffff';
+          ctx.beginPath();
+          ctx.roundRect(badgeMid.x - badgeW / 2, badgeMid.y - badgeH / 2, badgeW, badgeH, 3 / zoom);
+          ctx.fill();
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = (isSelected || isDimHovered ? 1.5 : 1) / zoom;
+          ctx.stroke();
+
+          if (!isDimEditing) {
+            ctx.fillStyle = '#0369a1';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(dimText, badgeMid.x, badgeMid.y);
+          }
+        }
       }
     });
 
@@ -1317,6 +1544,13 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   // Keyboard Event Handlers (Space for panning, Shift for ortho, Esc to cancel)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
       if (e.code === 'Space') {
         setIsSpacePressed(true);
       }
@@ -1324,6 +1558,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         setIsShiftPressed(true);
       }
       if (e.key === 'Escape') {
+        if (activeEditingDimension) {
+          isCancellingRef.current = true;
+          setActiveEditingDimension(null);
+          return;
+        }
         if (activeDrawingNode) {
           setActiveDrawingNode(null);
           soundEngine.playPencilClick();
@@ -1529,6 +1768,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       setHoveredWall(null);
       setHoveredRoomId(null);
     }
+
+    // Hover detection for wall dimension badges
+    const badgeHit = checkDimensionBadgeClick(mouseScreenX, mouseScreenY);
+    setHoveredDimensionWallId(badgeHit ? badgeHit.wall.id : null);
   };
 
   // Mouse Down
@@ -1550,6 +1793,25 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
 
     if (e.button !== 0) return; // Only primary left clicks below
+
+    // Check if user clicked directly on a dimension label
+    const hitBadge = checkDimensionBadgeClick(mouseScreenX, mouseScreenY);
+    if (hitBadge && !activeDrawingNode) {
+      onSelectWall(hitBadge.wall.id);
+      if (onSelectOpening) onSelectOpening(null);
+      if (onSelectRoom) onSelectRoom(null);
+
+      setActiveEditingDimension({
+        wallId: hitBadge.wall.id,
+        startNodeId: hitBadge.n1.id,
+        endNodeId: hitBadge.n2.id,
+        currentLengthMeters: hitBadge.currentLengthMeters,
+        badgeWorldPos: hitBadge.centerWorld,
+      });
+      setDimensionInputValue(hitBadge.currentLengthMeters.toFixed(2));
+      soundEngine.playPencilClick();
+      return;
+    }
 
     const world = screenToWorld(mouseScreenX, mouseScreenY);
 
@@ -1743,6 +2005,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
   // Cursor style based on active tool and state
   const getCursorClass = () => {
+    if (hoveredDimensionWallId) {
+      return 'cursor-pointer';
+    }
     if (isDraggingCanvas || isSpacePressed || activeTool === 'pan') {
       return isDraggingCanvas ? 'cursor-grabbing' : 'cursor-grab';
     }
@@ -1773,6 +2038,65 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
       />
+
+      {/* Floating Inline Editable Dimension Input Overlay */}
+      {activeEditingDimension && (
+        <div
+          className="absolute z-40 -translate-x-1/2 -translate-y-1/2 flex items-center bg-white/95 backdrop-blur-md rounded-xl shadow-2xl border-2 border-sky-500 overflow-hidden ring-4 ring-sky-500/20 animate-in zoom-in-95 duration-100 select-auto"
+          style={{
+            left: worldToScreen(
+              activeEditingDimension.badgeWorldPos.x,
+              activeEditingDimension.badgeWorldPos.y
+            ).x,
+            top: worldToScreen(
+              activeEditingDimension.badgeWorldPos.x,
+              activeEditingDimension.badgeWorldPos.y
+            ).y,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center pl-2 pr-1.5 py-1 gap-1">
+            <Pencil className="w-3 h-3 text-sky-500 shrink-0" />
+            <input
+              ref={dimensionInputRef}
+              type="text"
+              value={dimensionInputValue}
+              onChange={(e) => setDimensionInputValue(e.target.value)}
+              onKeyDown={handleDimensionKeyDown}
+              onBlur={handleDimensionSubmit}
+              className="w-16 px-1.5 py-0.5 text-xs font-mono font-bold text-sky-950 text-right outline-none bg-sky-50 rounded border border-sky-200 focus:bg-white focus:border-sky-500 transition-colors"
+              placeholder="0.00"
+            />
+            <span className="text-xs font-mono font-bold text-sky-700 select-none">
+              m
+            </span>
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleDimensionSubmit();
+              }}
+              className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-colors"
+              title="Apply Dimension (Enter)"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                isCancellingRef.current = true;
+                setActiveEditingDimension(null);
+              }}
+              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+              title="Cancel (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Floating Interactive Calibration Guidance Banner */}
       {activeTool === 'calibrate' && (
@@ -1805,7 +2129,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           </div>
           <div className="h-3 w-px bg-slate-200" />
           <div className="text-[11px] text-sky-700 font-sans font-medium">
-            {activeTool === 'wall'
+            {hoveredDimensionWallId
+              ? 'Click measurement label to edit dimension inline'
+              : activeTool === 'wall'
               ? activeDrawingNode
                 ? 'Click to place next corner · Esc to finish'
                 : 'Click to start drafting wall'

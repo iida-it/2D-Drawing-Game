@@ -33,14 +33,26 @@ export interface ClosedRoom {
   tagTextColor: string;
 }
 
-export type ToolType = 'select' | 'wall' | 'door' | 'window' | 'measure' | 'calibrate' | 'erase' | 'pan';
+export type OpeningType = 'door' | 'double-door' | 'sliding-door' | 'window';
+
+export type ToolType =
+  | 'select'
+  | 'wall'
+  | 'door'
+  | 'double-door'
+  | 'sliding-door'
+  | 'window'
+  | 'measure'
+  | 'calibrate'
+  | 'erase'
+  | 'pan';
 
 export interface WallOpening {
   id: string;
   wallId: string;
-  type: 'door' | 'window';
+  type: OpeningType;
   positionRatio: number; // 0.0 to 1.0 along the wall line (center of opening)
-  widthMeters: number; // default: 0.90m for door, 1.20m for window
+  widthMeters: number; // default: 0.85m for single door, 1.60m for double door, 1.65m for sliding door, 1.20m for window
   swingDirection?: 'left' | 'right';
   swingFlip?: boolean; // inside/outside swing orientation
 }

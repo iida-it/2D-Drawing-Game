@@ -1,7 +1,10 @@
+import React from 'react';
 import {
   MousePointer2,
   PenTool,
   DoorOpen,
+  SplitSquareVertical,
+  SlidersHorizontal,
   AppWindow,
   Ruler,
   Sliders,
@@ -27,15 +30,28 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   settings,
   onUpdateSettings,
 }) => {
-  const tools: { id: ToolType; label: string; shortcut: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'select', label: 'Select & Move', shortcut: 'V', icon: MousePointer2 },
-    { id: 'wall', label: 'Draw Wall', shortcut: 'W', icon: PenTool },
-    { id: 'door', label: 'Door Opening', shortcut: 'D', icon: DoorOpen },
-    { id: 'window', label: 'Window Opening', shortcut: 'N', icon: AppWindow },
-    { id: 'measure', label: 'Tape Measure', shortcut: 'M', icon: Ruler },
-    { id: 'calibrate', label: 'Calibrate Scale', shortcut: 'C', icon: Sliders },
-    { id: 'erase', label: 'Erase Wall / Opening', shortcut: 'E', icon: Eraser },
-    { id: 'pan', label: 'Pan Canvas', shortcut: 'Space', icon: Hand },
+  const tools: {
+    id: ToolType;
+    label: string;
+    sublabel?: string;
+    shortcut: string;
+    icon: React.FC<{ className?: string }>;
+    category?: 'draft' | 'openings' | 'measure';
+  }[] = [
+    { id: 'select', label: 'Select & Move', shortcut: 'V', icon: MousePointer2, category: 'draft' },
+    { id: 'wall', label: 'Draw Wall', shortcut: 'W', icon: PenTool, category: 'draft' },
+
+    // Standard Japanese Architectural Openings
+    { id: 'door', label: 'Single Door', sublabel: '片開き戸 (90° Arc)', shortcut: 'D', icon: DoorOpen, category: 'openings' },
+    { id: 'double-door', label: 'Double Door', sublabel: '両開き戸 (Dual)', shortcut: 'B', icon: SplitSquareVertical, category: 'openings' },
+    { id: 'sliding-door', label: 'Sliding Door', sublabel: '引違い戸 (Sliding)', shortcut: 'L', icon: SlidersHorizontal, category: 'openings' },
+    { id: 'window', label: 'Window', sublabel: '引違い窓 (Sash)', shortcut: 'N', icon: AppWindow, category: 'openings' },
+
+    // Measurement & Utilities
+    { id: 'measure', label: 'Tape Measure', shortcut: 'M', icon: Ruler, category: 'measure' },
+    { id: 'calibrate', label: 'Calibrate Scale', shortcut: 'C', icon: Sliders, category: 'measure' },
+    { id: 'erase', label: 'Erase Wall / Opening', shortcut: 'E', icon: Eraser, category: 'measure' },
+    { id: 'pan', label: 'Pan Canvas', shortcut: 'Space', icon: Hand, category: 'measure' },
   ];
 
   const toggleSnap = () => {
@@ -54,30 +70,38 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     <div className="absolute left-4 top-20 z-20 flex flex-col gap-2 select-none">
       {/* Primary Drafting Tool Dock */}
       <div className="bg-white/95 backdrop-blur-md rounded-2xl p-1.5 shadow-lg shadow-slate-300/40 border border-slate-200/80 flex flex-col gap-1 items-center">
-        {tools.map((t) => {
+        {tools.map((t, index) => {
           const Icon = t.icon;
           const isActive = activeTool === t.id;
+          const showDivider = t.id === 'door' || t.id === 'measure';
           return (
-            <button
-              key={t.id}
-              onClick={() => onSelectTool(t.id)}
-              className={`relative group w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-                isActive
-                  ? 'bg-sky-600 text-white shadow-sm shadow-sky-200'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-              title={`${t.label} (${t.shortcut})`}
-            >
-              <Icon className="w-5 h-5 stroke-[2.2]" />
+            <React.Fragment key={t.id}>
+              {showDivider && <div className="w-6 h-px bg-slate-200/80 my-0.5" />}
+              <button
+                onClick={() => onSelectTool(t.id)}
+                className={`relative group w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
+                  isActive
+                    ? 'bg-sky-600 text-white shadow-sm shadow-sky-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title={`${t.label} (${t.shortcut})`}
+              >
+                <Icon className="w-5 h-5 stroke-[2.2]" />
 
-              {/* Tooltip */}
-              <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-white text-[11px] font-medium rounded-lg shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 flex items-center gap-1.5">
-                <span>{t.label}</span>
-                <kbd className="bg-slate-700 text-slate-200 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                  {t.shortcut}
-                </kbd>
-              </div>
-            </button>
+                {/* Tooltip */}
+                <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-white text-[11px] font-medium rounded-lg shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 flex items-center gap-2">
+                  <div className="flex flex-col text-left">
+                    <span className="font-semibold text-white">{t.label}</span>
+                    {t.sublabel && (
+                      <span className="text-[10px] text-sky-300 font-sans">{t.sublabel}</span>
+                    )}
+                  </div>
+                  <kbd className="bg-slate-700 text-slate-200 px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0">
+                    {t.shortcut}
+                  </kbd>
+                </div>
+              </button>
+            </React.Fragment>
           );
         })}
       </div>

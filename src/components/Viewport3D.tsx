@@ -24,7 +24,11 @@ import {
   Crosshair,
   Check,
   X,
-  Sliders,
+  SlidersHorizontal,
+  Eye,
+  Palette,
+  Sparkles,
+  Grid,
 } from 'lucide-react';
 import { Node, Wall, WallOpening, ClosedRoom } from '../types';
 import { build3DArchitecturalModel } from '../utils/threeConversion';
@@ -44,6 +48,7 @@ interface Viewport3DProps {
 type LightingPreset = 'noon' | 'sunset' | 'night';
 type CameraPreset = 'iso' | 'top' | 'eye' | 'front';
 type GizmoMode = 'translate' | 'rotate' | 'scale';
+export type ShadingMode = 'material' | 'wireframe' | 'normals' | 'xray' | 'points';
 
 interface LoadedModelRecord {
   id: string;
@@ -52,6 +57,16 @@ interface LoadedModelRecord {
   vertexCount?: number;
   faceCount?: number;
 }
+
+// 6 Preset background color swatches matching specification
+const BG_SWATCHES = [
+  { hex: '#1e1e1e', name: 'Studio Dark' },
+  { hex: '#2c3440', name: 'Slate Charcoal' },
+  { hex: '#1a2233', name: 'Deep Navy' },
+  { hex: '#0f172a', name: 'Midnight Slate' },
+  { hex: '#000000', name: 'Pitch Black' },
+  { hex: '#71717a', name: 'Neutral Gray' },
+];
 
 export const Viewport3D: React.FC<Viewport3DProps> = ({
   active,
@@ -75,6 +90,32 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
   const hemiLightRef = useRef<THREE.HemisphereLight | null>(null);
 
+  // Scene Helpers Refs
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
+  const boxHelperRef = useRef<THREE.BoxHelper | null>(null);
+
+  // Shading Materials & Point Cloud Refs
+  const originalMaterialsMap = useRef(new WeakMap<THREE.Mesh, THREE.Material | THREE.Material[]>());
+  const normalMaterialRef = useRef<THREE.MeshNormalMaterial | null>(null);
+  const xrayMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const pointsMaterialRef = useRef<THREE.PointsMaterial | null>(null);
+  const pointsGroupRef = useRef<THREE.Group | null>(null);
+
+  // Viewport Shading & Helpers State
+  const [isDisplayMenuOpen, setIsDisplayMenuOpen] = useState<boolean>(false);
+  const displayMenuRef = useRef<HTMLDivElement>(null);
+  const [shadingMode, setShadingMode] = useState<ShadingMode>('material');
+  const [pointCloudSize, setPointCloudSize] = useState<number>(0.05);
+
+  // Helpers State
+  const [showGroundGrid, setShowGroundGrid] = useState<boolean>(true);
+  const [showAxesHelper, setShowAxesHelper] = useState<boolean>(false);
+  const [showSelectionBounds, setShowSelectionBounds] = useState<boolean>(true);
+
+  // Background Color State
+  const [currentBgColor, setCurrentBgColor] = useState<string>('#f1f5f9');
+
   // Interactive 3D Controls State
   const [wallHeight, setWallHeight] = useState<number>(2.8);
   const [lighting, setLighting] = useState<LightingPreset>('noon');
@@ -89,6 +130,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const modelsGroupRef = useRef<THREE.Group | null>(null);
   const [importedModels, setImportedModels] = useState<LoadedModelRecord[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const selectedModelIdRef = useRef<string | null>(null);
+  selectedModelIdRef.current = selectedModelId;
+
   const [isGLBModalOpen, setIsGLBModalOpen] = useState<boolean>(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
   const [gizmoSpace, setGizmoSpace] = useState<'world' | 'local'>('world');
@@ -103,6 +147,205 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     setToastNotice(message);
     setTimeout(() => setToastNotice(null), 3800);
   }, []);
+
+  // Close Display Menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        displayMenuRef.current &&
+        !displayMenuRef.current.contains(event.target as HTMLElement)
+      ) {
+        setIsDisplayMenuOpen(false);
+      }
+    };
+
+    if (isDisplayMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDisplayMenuOpen]);
+
+  // Traverse all model meshes across architectural and imported groups
+  const traverseAllMeshes = useCallback((callback: (mesh: THREE.Mesh) => void) => {
+    const processGroup = (group: THREE.Group | null) => {
+      if (!group) return;
+      group.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh && child.type !== 'Points') {
+          callback(child as THREE.Mesh);
+        }
+      });
+    };
+    processGroup(currentModelGroupRef.current);
+    processGroup(modelsGroupRef.current);
+  }, []);
+
+  // Apply Shading Mode (Material, Wireframe, Normals, X-Ray, Point Cloud)
+  const applyShading = useCallback(
+    (mode: ShadingMode, ptSize?: number) => {
+      const activeSize = ptSize ?? pointCloudSize;
+
+      // Ensure shared materials are initialized
+      if (!normalMaterialRef.current) {
+        normalMaterialRef.current = new THREE.MeshNormalMaterial({
+          side: THREE.DoubleSide,
+        });
+      }
+      if (!xrayMaterialRef.current) {
+        xrayMaterialRef.current = new THREE.MeshStandardMaterial({
+          color: 0x38bdf8,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+          roughness: 0.3,
+          metalness: 0.1,
+          side: THREE.DoubleSide,
+        });
+      }
+      if (!pointsMaterialRef.current) {
+        pointsMaterialRef.current = new THREE.PointsMaterial({
+          color: 0x38bdf8,
+          size: activeSize,
+          sizeAttenuation: true,
+        });
+      } else {
+        pointsMaterialRef.current.size = activeSize;
+      }
+
+      // Step 1: Cache original materials via WeakMap for any newly discovered meshes
+      traverseAllMeshes((mesh) => {
+        if (!originalMaterialsMap.current.has(mesh)) {
+          originalMaterialsMap.current.set(mesh, mesh.material);
+        }
+      });
+
+      // Step 2: Handle Point Cloud vs Mesh Shading
+      if (mode === 'points') {
+        if (pointsGroupRef.current && pointsMaterialRef.current) {
+          pointsGroupRef.current.clear();
+          pointsGroupRef.current.visible = true;
+
+          traverseAllMeshes((mesh) => {
+            mesh.visible = false;
+            if (mesh.geometry) {
+              const pts = new THREE.Points(mesh.geometry, pointsMaterialRef.current!);
+              mesh.updateWorldMatrix(true, false);
+              pts.applyMatrix4(mesh.matrixWorld);
+              pointsGroupRef.current!.add(pts);
+            }
+          });
+        }
+      } else {
+        // Hide point cloud group if previously visible
+        if (pointsGroupRef.current) {
+          pointsGroupRef.current.clear();
+          pointsGroupRef.current.visible = false;
+        }
+
+        // Apply mesh shading
+        traverseAllMeshes((mesh) => {
+          mesh.visible = true;
+          const orig = originalMaterialsMap.current.get(mesh);
+
+          if (mode === 'material') {
+            // Restore original cached PBR material
+            if (orig) {
+              mesh.material = orig;
+              if (Array.isArray(orig)) {
+                orig.forEach((m) => {
+                  (m as any).wireframe = false;
+                });
+              } else {
+                (orig as any).wireframe = false;
+              }
+            }
+          } else if (mode === 'wireframe') {
+            // Set wireframe = true on original material
+            if (orig) {
+              mesh.material = orig;
+              if (Array.isArray(orig)) {
+                orig.forEach((m) => {
+                  (m as any).wireframe = true;
+                });
+              } else {
+                (orig as any).wireframe = true;
+              }
+            }
+          } else if (mode === 'normals') {
+            // Swap to MeshNormalMaterial
+            mesh.material = normalMaterialRef.current!;
+          } else if (mode === 'xray') {
+            // Swap to X-Ray transparent blue blend material
+            mesh.material = xrayMaterialRef.current!;
+          }
+        });
+      }
+    },
+    [pointCloudSize, traverseAllMeshes]
+  );
+
+  // Switch shading mode handler
+  const handleSetShadingMode = (newMode: ShadingMode) => {
+    setShadingMode(newMode);
+    applyShading(newMode);
+  };
+
+  // Point cloud size slider handler
+  const handlePointCloudSizeChange = (newSize: number) => {
+    setPointCloudSize(newSize);
+    if (pointsMaterialRef.current) {
+      pointsMaterialRef.current.size = newSize;
+    }
+    if (shadingMode === 'points') {
+      applyShading('points', newSize);
+    }
+  };
+
+  // Background Swatch selection
+  const handleSelectBgColor = (hex: string) => {
+    setCurrentBgColor(hex);
+    if (sceneRef.current && rendererRef.current) {
+      const col = new THREE.Color(hex);
+      sceneRef.current.background = col;
+      if (sceneRef.current.fog) {
+        sceneRef.current.fog.color = col;
+      }
+      rendererRef.current.setClearColor(col);
+    }
+  };
+
+  // Toggle Helpers Visibility
+  useEffect(() => {
+    if (gridHelperRef.current) {
+      gridHelperRef.current.visible = showGroundGrid;
+    }
+  }, [showGroundGrid]);
+
+  useEffect(() => {
+    if (axesHelperRef.current) {
+      axesHelperRef.current.visible = showAxesHelper;
+    }
+  }, [showAxesHelper]);
+
+  // Update Selection Bounds BoxHelper
+  useEffect(() => {
+    const bh = boxHelperRef.current;
+    if (!bh) return;
+
+    if (!showSelectionBounds || !selectedModelId) {
+      bh.visible = false;
+      return;
+    }
+
+    const item = importedModels.find((m) => m.id === selectedModelId);
+    if (item && item.object) {
+      bh.setFromObject(item.object);
+      bh.visible = true;
+    } else {
+      bh.visible = false;
+    }
+  }, [selectedModelId, showSelectionBounds, importedModels]);
 
   // Update TransformControls mode / space / snap
   useEffect(() => {
@@ -123,24 +366,34 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
   }, [gizmoMode, gizmoSpace, snapEnabled]);
 
-  // Select an imported 3D model and attach Gizmo
-  const selectModel = useCallback((modelId: string | null) => {
-    setSelectedModelId(modelId);
-    const tc = transformControlsRef.current;
-    if (!tc) return;
+  // Select an imported 3D model and attach Gizmo & BoxHelper
+  const selectModel = useCallback(
+    (modelId: string | null) => {
+      setSelectedModelId(modelId);
+      const tc = transformControlsRef.current;
+      const bh = boxHelperRef.current;
+      if (!tc) return;
 
-    if (!modelId) {
-      tc.detach();
-      return;
-    }
+      if (!modelId) {
+        tc.detach();
+        if (bh) bh.visible = false;
+        return;
+      }
 
-    const item = importedModels.find((m) => m.id === modelId);
-    if (item && item.object) {
-      tc.attach(item.object);
-    } else {
-      tc.detach();
-    }
-  }, [importedModels]);
+      const item = importedModels.find((m) => m.id === modelId);
+      if (item && item.object) {
+        tc.attach(item.object);
+        if (bh && showSelectionBounds) {
+          bh.setFromObject(item.object);
+          bh.visible = true;
+        }
+      } else {
+        tc.detach();
+        if (bh) bh.visible = false;
+      }
+    },
+    [importedModels, showSelectionBounds]
+  );
 
   // Delete an imported model
   const handleDeleteModel = (modelId: string) => {
@@ -149,6 +402,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (selectedModelId === modelId) {
       transformControlsRef.current?.detach();
+      if (boxHelperRef.current) boxHelperRef.current.visible = false;
       setSelectedModelId(null);
     }
 
@@ -174,6 +428,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   // Clear all imported models
   const handleClearAllModels = () => {
     transformControlsRef.current?.detach();
+    if (boxHelperRef.current) boxHelperRef.current.visible = false;
     setSelectedModelId(null);
 
     if (modelsGroupRef.current) {
@@ -199,9 +454,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     setImportedModels((prev) => [...prev, newRecord]);
 
-    // Attach transform gizmo immediately so user can place it
+    // Attach transform gizmo and update selection
     transformControlsRef.current?.attach(model);
     setSelectedModelId(model.uuid);
+
+    if (boxHelperRef.current && showSelectionBounds) {
+      boxHelperRef.current.setFromObject(model);
+      boxHelperRef.current.visible = true;
+    }
+
+    // Apply active shading mode to new model
+    if (shadingMode !== 'material') {
+      applyShading(shadingMode);
+    }
 
     showNotification(`Added "${name}" with 3D Transform Gizmo active.`);
     setIsGLBModalOpen(false);
@@ -255,6 +520,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       });
     }
 
+    // Reapply active shading mode if non-default
+    if (shadingMode !== 'material') {
+      applyShading(shadingMode);
+    }
+
     // Auto-frame camera if it's the first build
     if (controlsRef.current && cameraRef.current) {
       controlsRef.current.target.set(0, wallHeight * 0.4, 0);
@@ -264,15 +534,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
       controlsRef.current.update();
     }
-  }, [nodes, walls, openings, closedRooms, scaleFactor, wallHeight, cutawayMode, activeCamPreset]);
+  }, [
+    nodes,
+    walls,
+    openings,
+    closedRooms,
+    scaleFactor,
+    wallHeight,
+    cutawayMode,
+    activeCamPreset,
+    shadingMode,
+    applyShading,
+  ]);
 
   // Update lighting preset
   useEffect(() => {
     if (!sceneRef.current || !dirLightRef.current || !hemiLightRef.current) return;
 
     if (lighting === 'noon') {
-      sceneRef.current.background = new THREE.Color(0xf1f5f9);
-      sceneRef.current.fog = new THREE.Fog(0xf1f5f9, 20, 60);
+      sceneRef.current.background = new THREE.Color(currentBgColor || 0xf1f5f9);
+      sceneRef.current.fog = new THREE.Fog(currentBgColor || 0xf1f5f9, 20, 60);
       dirLightRef.current.color.setHex(0xfff8ee);
       dirLightRef.current.intensity = 1.6;
       dirLightRef.current.position.set(12, 18, 10);
@@ -280,8 +561,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       hemiLightRef.current.groundColor.setHex(0x94a3b8);
       hemiLightRef.current.intensity = 0.8;
     } else if (lighting === 'sunset') {
-      sceneRef.current.background = new THREE.Color(0xfde68a);
-      sceneRef.current.fog = new THREE.Fog(0xfde68a, 15, 50);
+      sceneRef.current.background = new THREE.Color(currentBgColor || 0xfde68a);
+      sceneRef.current.fog = new THREE.Fog(currentBgColor || 0xfde68a, 15, 50);
       dirLightRef.current.color.setHex(0xf97316);
       dirLightRef.current.intensity = 2.0;
       dirLightRef.current.position.set(18, 8, 14);
@@ -290,8 +571,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       hemiLightRef.current.intensity = 0.9;
     } else {
       // Blueprint Night Glow
-      sceneRef.current.background = new THREE.Color(0x0f172a);
-      sceneRef.current.fog = new THREE.Fog(0x0f172a, 15, 55);
+      sceneRef.current.background = new THREE.Color(currentBgColor || 0x0f172a);
+      sceneRef.current.fog = new THREE.Fog(currentBgColor || 0x0f172a, 15, 55);
       dirLightRef.current.color.setHex(0x38bdf8);
       dirLightRef.current.intensity = 1.0;
       dirLightRef.current.position.set(10, 15, 10);
@@ -299,7 +580,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       hemiLightRef.current.groundColor.setHex(0x020617);
       hemiLightRef.current.intensity = 0.6;
     }
-  }, [lighting]);
+  }, [lighting, currentBgColor]);
 
   // Handle camera presets
   const applyCameraPreset = (preset: CameraPreset) => {
@@ -383,16 +664,46 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.fog = new THREE.Fog(0xf1f5f9, 20, 60);
     sceneRef.current = scene;
 
+    // Studio Environment reflection map
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmremGenerator.dispose();
+
+    // Scene Helpers: Ground Grid
+    const gridHelper = new THREE.GridHelper(50, 50, 0x0284c7, 0x94a3b8);
+    gridHelper.position.y = -0.005;
+    (gridHelper.material as THREE.Material).transparent = true;
+    (gridHelper.material as THREE.Material).opacity = 0.6;
+    gridHelper.visible = showGroundGrid;
+    scene.add(gridHelper);
+    gridHelperRef.current = gridHelper;
+
+    // Scene Helpers: XYZ Axes
+    const axesHelper = new THREE.AxesHelper(3.0);
+    axesHelper.position.set(0, 0.01, 0);
+    axesHelper.visible = showAxesHelper;
+    scene.add(axesHelper);
+    axesHelperRef.current = axesHelper;
+
+    // Scene Helpers: Selection BoxHelper
+    const dummyObj = new THREE.Object3D();
+    const boxHelper = new THREE.BoxHelper(dummyObj, 0x0284c7);
+    boxHelper.visible = false;
+    scene.add(boxHelper);
+    boxHelperRef.current = boxHelper;
+
     // Imported GLB Models Root Group
     const modelsGroup = new THREE.Group();
     modelsGroup.name = 'ImportedGLBModelsRoot';
     scene.add(modelsGroup);
     modelsGroupRef.current = modelsGroup;
 
-    // Studio Environment reflection map
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmremGenerator.dispose();
+    // Point Cloud Root Group
+    const pointsGroup = new THREE.Group();
+    pointsGroup.name = 'PointCloudRoot';
+    pointsGroup.visible = false;
+    scene.add(pointsGroup);
+    pointsGroupRef.current = pointsGroup;
 
     // Camera
     const camera = new THREE.PerspectiveCamera(
@@ -426,6 +737,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     transformControls.addEventListener('dragging-changed', (event: any) => {
       controls.enabled = !event.value;
       isGizmoDraggingRef.current = event.value;
+    });
+
+    // Update BoxHelper continuously while transforming
+    transformControls.addEventListener('change', () => {
+      if (boxHelperRef.current && boxHelperRef.current.visible) {
+        boxHelperRef.current.update();
+      }
     });
 
     // 3-Point Studio Lighting Rig
@@ -488,6 +806,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           if (topObj) {
             transformControls.attach(topObj);
             setSelectedModelId(topObj.uuid);
+            if (boxHelperRef.current) {
+              boxHelperRef.current.setFromObject(topObj);
+              boxHelperRef.current.visible = true;
+            }
             return;
           }
         }
@@ -495,6 +817,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       // If clicked empty area (not a model), detach gizmo
       transformControls.detach();
+      if (boxHelperRef.current) boxHelperRef.current.visible = false;
       setSelectedModelId(null);
     };
 
@@ -523,6 +846,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         cancelAnimationFrame(animFrameIdRef.current);
         animFrameIdRef.current = null;
       }
+      gridHelper.dispose();
+      axesHelper.dispose();
+      boxHelper.dispose();
+      normalMaterialRef.current?.dispose();
+      xrayMaterialRef.current?.dispose();
+      pointsMaterialRef.current?.dispose();
       transformControls.dispose();
       controls.dispose();
       renderer.dispose();
@@ -563,6 +892,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         controlsRef.current.update();
       }
 
+      // Keep selection bounds BoxHelper updated if active
+      if (boxHelperRef.current && boxHelperRef.current.visible && selectedModelIdRef.current) {
+        boxHelperRef.current.update();
+      }
+
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
@@ -578,7 +912,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
   }, [active, autoRotate]);
 
-  // Keyboard shortcut listener for Gizmo modes
+  // Keyboard shortcut listener for Gizmo modes & ESC
   useEffect(() => {
     if (!active) return;
 
@@ -592,14 +926,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       } else if (e.key === 'r' || e.key === 'R') {
         setGizmoMode('scale');
       } else if (e.key === 'Escape') {
+        if (isDisplayMenuOpen) {
+          setIsDisplayMenuOpen(false);
+          return;
+        }
         transformControlsRef.current?.detach();
+        if (boxHelperRef.current) boxHelperRef.current.visible = false;
         setSelectedModelId(null);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [active]);
+  }, [active, isDisplayMenuOpen]);
 
   const selectedModel = importedModels.find((m) => m.id === selectedModelId);
 
@@ -770,8 +1109,248 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         </div>
       )}
 
-      {/* Top-Right Quick Screenshot, GLB Export & Reset View */}
+      {/* Top-Right Quick Controls: Display Popover, Screenshot, GLB Export & Reset View */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        {/* VIEWPORT SHADING & HELPERS (DISPLAY DROPDOWN) */}
+        <div className="relative" ref={displayMenuRef}>
+          <button
+            onClick={() => setIsDisplayMenuOpen(!isDisplayMenuOpen)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl shadow-md border text-xs font-semibold transition-all hover:scale-[1.02] active:scale-95 ${
+              isDisplayMenuOpen
+                ? 'bg-sky-600 text-white border-sky-500 shadow-sky-200 ring-2 ring-sky-400/30'
+                : 'bg-white/95 hover:bg-white text-slate-700 border-slate-200/90'
+            }`}
+            title="Viewport Shading, Scene Helpers & Background Settings"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span>Display</span>
+            <ChevronDown
+              className={`w-3 h-3 transition-transform duration-200 ${
+                isDisplayMenuOpen ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+
+          {/* Comprehensive Viewport Shading & Helpers Popover Card */}
+          {isDisplayMenuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200/90 p-3.5 z-40 text-xs animate-in fade-in zoom-in-95 duration-150 select-none">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5 mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1 rounded-lg bg-sky-100 text-sky-700">
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-xs leading-none">
+                      Viewport Shading & Helpers
+                    </h3>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      3D Display Presets
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsDisplayMenuOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* 1. RENDER SHADING SECTION */}
+              <div className="mb-3.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono">
+                    RENDER SHADING
+                  </span>
+                  <span className="text-[10px] font-medium text-sky-700 capitalize">
+                    {shadingMode}
+                  </span>
+                </div>
+
+                {/* 5 Shading Toggle Buttons */}
+                <div className="grid grid-cols-3 gap-1 bg-slate-100/80 p-1 rounded-xl mb-2 border border-slate-200/60">
+                  <button
+                    onClick={() => handleSetShadingMode('material')}
+                    className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all flex items-center justify-center gap-1 ${
+                      shadingMode === 'material'
+                        ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Material: Restores original PBR/Texture materials (cached via WeakMap)"
+                  >
+                    <Palette className="w-3 h-3 text-sky-600" />
+                    <span>Material</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSetShadingMode('wireframe')}
+                    className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all flex items-center justify-center gap-1 ${
+                      shadingMode === 'wireframe'
+                        ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Wireframe: Sets material.wireframe = true on all meshes"
+                  >
+                    <Grid className="w-3 h-3 text-indigo-600" />
+                    <span>Wireframe</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSetShadingMode('normals')}
+                    className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all flex items-center justify-center gap-1 ${
+                      shadingMode === 'normals'
+                        ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Normals: Swaps mesh materials to THREE.MeshNormalMaterial"
+                  >
+                    <Sparkles className="w-3 h-3 text-emerald-600" />
+                    <span>Normals</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
+                  <button
+                    onClick={() => handleSetShadingMode('xray')}
+                    className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all flex items-center justify-center gap-1.5 ${
+                      shadingMode === 'xray'
+                        ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="X-Ray: Transparent blue blend material (opacity: 0.35, depthWrite: false)"
+                  >
+                    <Eye className="w-3 h-3 text-cyan-600" />
+                    <span>X-Ray</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSetShadingMode('points')}
+                    className={`py-1.5 px-2 rounded-lg font-medium text-[11px] transition-all flex items-center justify-center gap-1.5 ${
+                      shadingMode === 'points'
+                        ? 'bg-white text-sky-800 shadow-2xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Point Cloud: Renders scene vertices as THREE.Points"
+                  >
+                    <Crosshair className="w-3 h-3 text-amber-600" />
+                    <span>Point Cloud</span>
+                  </button>
+                </div>
+
+                {/* Point Cloud Size Slider (Active when points mode is selected) */}
+                {shadingMode === 'points' && (
+                  <div className="mt-2.5 p-2 bg-sky-50/70 border border-sky-200/80 rounded-xl animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-[11px] font-medium text-sky-900 mb-1">
+                      <span>Point Cloud Size:</span>
+                      <span className="font-mono font-bold">{pointCloudSize.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.01"
+                      max="0.20"
+                      step="0.01"
+                      value={pointCloudSize}
+                      onChange={(e) => handlePointCloudSizeChange(parseFloat(e.target.value))}
+                      className="w-full accent-sky-600 cursor-pointer h-1.5 bg-sky-200 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[9px] text-sky-600 font-mono mt-0.5">
+                      <span>0.01</span>
+                      <span>Default 0.05</span>
+                      <span>0.20</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. SCENE HELPERS SECTION */}
+              <div className="mb-3.5 border-t border-slate-200/80 pt-2.5">
+                <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono block mb-1.5">
+                  SCENE HELPERS
+                </span>
+
+                <div className="flex flex-col gap-1.5">
+                  {/* Ground Grid Checkbox */}
+                  <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-100/80 cursor-pointer transition-colors group">
+                    <span className="text-[11px] font-medium text-slate-700 group-hover:text-slate-900">
+                      Ground Grid
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={showGroundGrid}
+                      onChange={(e) => setShowGroundGrid(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-600 accent-sky-600 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* XYZ Axes Helper Checkbox */}
+                  <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-100/80 cursor-pointer transition-colors group">
+                    <span className="text-[11px] font-medium text-slate-700 group-hover:text-slate-900">
+                      XYZ Axes Helper
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={showAxesHelper}
+                      onChange={(e) => setShowAxesHelper(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-600 accent-sky-600 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Selection Bounds Checkbox */}
+                  <label className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-100/80 cursor-pointer transition-colors group">
+                    <span className="text-[11px] font-medium text-slate-700 group-hover:text-slate-900">
+                      Selection Bounds
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={showSelectionBounds}
+                      onChange={(e) => setShowSelectionBounds(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-600 accent-sky-600 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* 3. BACKGROUND COLOR PALETTE SECTION */}
+              <div className="border-t border-slate-200/80 pt-2.5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono">
+                    BACKGROUND COLOR
+                  </span>
+                  <span className="text-[10px] font-mono font-medium text-slate-500 uppercase">
+                    {currentBgColor}
+                  </span>
+                </div>
+
+                {/* 6 Preset Color Swatches */}
+                <div className="grid grid-cols-6 gap-1.5">
+                  {BG_SWATCHES.map((swatch) => {
+                    const isSelected =
+                      currentBgColor.toLowerCase() === swatch.hex.toLowerCase();
+                    return (
+                      <button
+                        key={swatch.hex}
+                        onClick={() => handleSelectBgColor(swatch.hex)}
+                        className={`h-7 w-full rounded-lg transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border relative ${
+                          isSelected
+                            ? 'ring-2 ring-sky-500 ring-offset-1 border-white/60 shadow-xs'
+                            : 'border-slate-300/60'
+                        }`}
+                        style={{ backgroundColor: swatch.hex }}
+                        title={`${swatch.name} (${swatch.hex})`}
+                      >
+                        {isSelected && (
+                          <Check className="w-3.5 h-3.5 text-white drop-shadow-sm" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Export Binary .GLB Button */}
         <button
           onClick={handleExportGLB}
@@ -920,7 +1499,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           {/* Sun / Lighting Presets */}
           <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/70">
             <button
-              onClick={() => setLighting('noon')}
+              onClick={() => {
+                setLighting('noon');
+                setCurrentBgColor('#f1f5f9');
+              }}
               className={`p-1.5 rounded-lg transition-all ${
                 lighting === 'noon'
                   ? 'bg-white text-amber-600 shadow-2xs'
@@ -931,7 +1513,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <Sun className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => setLighting('sunset')}
+              onClick={() => {
+                setLighting('sunset');
+                setCurrentBgColor('#fde68a');
+              }}
               className={`p-1.5 rounded-lg transition-all ${
                 lighting === 'sunset'
                   ? 'bg-white text-orange-600 shadow-2xs'
@@ -942,7 +1527,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <Sunset className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => setLighting('night')}
+              onClick={() => {
+                setLighting('night');
+                setCurrentBgColor('#0f172a');
+              }}
               className={`p-1.5 rounded-lg transition-all ${
                 lighting === 'night'
                   ? 'bg-white text-sky-600 shadow-2xs'
