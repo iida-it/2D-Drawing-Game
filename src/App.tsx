@@ -470,6 +470,11 @@ export default function App() {
         return;
       }
 
+      // Reserve all plain numeric keys ('0'-'9', '.', ',') strictly for direct dimension typing in Canvas2D
+      if (/^[\d.,]$/.test(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        return;
+      }
+
       // Single-Key Tool Shortcuts (unless Ctrl, Meta, or Alt is pressed)
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         // V: Select Tool
@@ -578,8 +583,8 @@ export default function App() {
         }
       }
 
-      // View Mode Toggle (Tab or 3)
-      if (e.key === 'Tab' || e.key === '3') {
+      // View Mode Toggle (Tab or Alt+2 / Alt+3)
+      if (e.key === 'Tab' || (e.altKey && (e.key === '2' || e.key === '3'))) {
         e.preventDefault();
         setViewMode((prev) => {
           const next = prev === '2d' ? '3d' : '2d';

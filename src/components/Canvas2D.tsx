@@ -1863,6 +1863,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           const targetWall = walls.find((w) => w.id === targetWallId);
           if (targetWall) {
             e.preventDefault();
+            e.stopPropagation();
+            if (typeof e.stopImmediatePropagation === 'function') {
+              e.stopImmediatePropagation();
+            }
             const charToUse = e.key === ',' ? '.' : e.key;
             openDimensionInputForWall(targetWall, charToUse);
             return;
@@ -1945,11 +1949,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    window.addEventListener('keyup', handleKeyUp, { capture: true });
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+      window.removeEventListener('keyup', handleKeyUp, { capture: true });
     };
   }, [
     activeDrawingNode,
