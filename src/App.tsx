@@ -152,34 +152,32 @@ export default function App() {
 
   // Add Wall
   const handleAddWall = useCallback(
-    (startNode: Node, endNode: Node) => {
-      const nodeMap = new Map<string, Node>();
-      nodes.forEach((n) => nodeMap.set(n.id, n));
-
+    (startNode: Node, endNode: Node, arcProps?: Partial<Wall>) => {
       const newNodes = [...nodes];
-      if (!nodeMap.has(startNode.id)) {
+      if (!newNodes.some((n) => n.id === startNode.id)) {
         newNodes.push(startNode);
-        nodeMap.set(startNode.id, startNode);
       }
-      if (!nodeMap.has(endNode.id)) {
+      if (!newNodes.some((n) => n.id === endNode.id)) {
         newNodes.push(endNode);
-        nodeMap.set(endNode.id, endNode);
       }
 
-      // Check if identical wall already exists
-      const wallExists = walls.some(
-        (w) =>
-          (w.startNodeId === startNode.id && w.endNodeId === endNode.id) ||
-          (w.startNodeId === endNode.id && w.endNodeId === startNode.id)
-      );
-
-      if (wallExists) return;
+      // For straight walls, check if already exists
+      if (!arcProps?.isArc) {
+        const wallExists = walls.some(
+          (w) =>
+            !w.isArc &&
+            ((w.startNodeId === startNode.id && w.endNodeId === endNode.id) ||
+              (w.startNodeId === endNode.id && w.endNodeId === startNode.id))
+        );
+        if (wallExists) return;
+      }
 
       const newWall: Wall = {
         id: `wall-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         startNodeId: startNode.id,
         endNodeId: endNode.id,
         thickness: settings.wallThicknessMeters,
+        ...arcProps,
       };
 
       const newWalls = [...walls, newWall];
@@ -191,6 +189,18 @@ export default function App() {
       pushHistory(newNodes, newWalls, openings);
     },
     [nodes, walls, openings, settings.wallThicknessMeters, pushHistory]
+  );
+
+  // Update Wall (e.g. radius or arc properties)
+  const handleUpdateWall = useCallback(
+    (wallId: string, updates: Partial<Wall>) => {
+      const newWalls = walls.map((w) =>
+        w.id === wallId ? { ...w, ...updates } : w
+      );
+      setWalls(newWalls);
+      pushHistory(nodes, newWalls, openings);
+    },
+    [walls, nodes, openings, pushHistory]
   );
 
   // Add Opening (Single Door, Double Door, Sliding Door, Window)
@@ -488,6 +498,18 @@ export default function App() {
           setToastNotification('✏️ Wall Drafting Tool (壁作成): Click to draft walls.');
         }
 
+        // A: 3-Point Arc Wall Tool
+        if (e.key === 'a' || e.key === 'A') {
+          setActiveTool('arc-3pt');
+          setToastNotification('⌒ 3-Point Arc Wall (3点円弧): Click 3 points to draft curved wall.');
+        }
+
+        // R: Start-End-Radius Arc Wall Tool
+        if (e.key === 'r' || e.key === 'R') {
+          setActiveTool('arc-radius');
+          setToastNotification('⌒ Start-End-Radius Arc (始点・終点・半径円弧): Click start, end & set radius.');
+        }
+
         // D: Single Door
         if (e.key === 'd' || e.key === 'D') {
           setActiveTool('door');
@@ -747,6 +769,7 @@ export default function App() {
               customRoomTypes={customRoomTypes}
               onCycleRoomType={handleCycleRoomType}
               onAddWall={handleAddWall}
+              onUpdateWall={handleUpdateWall}
               onAddOpening={handleAddOpening}
               onUpdateOpening={handleUpdateOpening}
               onDeleteOpening={handleDeleteOpening}

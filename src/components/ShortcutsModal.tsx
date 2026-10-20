@@ -14,6 +14,8 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   const toolShortcuts = [
     { key: 'V', desc: t('scSelectMove') },
     { key: 'P / L', desc: t('scDrawWall') },
+    { key: 'A', desc: t('toolArc3Pt') || '3-Point Arc' },
+    { key: 'R', desc: t('toolArcRadius') || 'Start, End, Radius Arc' },
     { key: 'D', desc: t('scDoorTool') },
     { key: 'B', desc: t('toolDoubleDoor') || 'Double Door' },
     { key: 'S', desc: t('toolSlidingDoor') || 'Sliding Door' },
@@ -26,7 +28,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     { key: 'O', desc: t('scOrthoAngle') },
     { key: 'G', desc: t('scGhostLayer') },
     { key: 'F', desc: t('scFlipSwing') },
-    { key: 'Tab / 3', desc: t('scToggle2D3D') },
+    { key: 'Tab', desc: t('scToggle2D3D') },
     { key: 'W/E/R (3D)', desc: t('sc3DGizmo') },
   ];
 

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ClosedRoom, WallOpening, Wall, Node, Point } from '../types';
+import { sampleArcPoints } from './geometry';
 
 export interface WallSegment2D {
   x1: number;
@@ -430,6 +431,43 @@ export function build3DArchitecturalModel({
     const n1 = nodeMap.get(w.startNodeId);
     const n2 = nodeMap.get(w.endNodeId);
     if (!n1 || !n2) return;
+
+    // Curved Arc Wall 3D Extrusion (Subdivide arc into 20 smooth segments)
+    if (w.isArc && w.arcCenter && w.arcRadius) {
+      const arcPoints = sampleArcPoints(
+        {
+          center: w.arcCenter,
+          radius: w.arcRadius,
+          startAngle: w.arcStartAngle ?? 0,
+          endAngle: w.arcEndAngle ?? Math.PI,
+          counterClockwise: w.arcCcw ?? false,
+        },
+        20
+      );
+
+      const thickness = w.thickness || wallThicknessMeters;
+      const arcSegments: WallSegment2D[] = [];
+
+      for (let i = 0; i < arcPoints.length - 1; i++) {
+        const pA_3d = to3DCoords(arcPoints[i].x, arcPoints[i].y);
+        const pB_3d = to3DCoords(arcPoints[i + 1].x, arcPoints[i + 1].y);
+        arcSegments.push({
+          x1: pA_3d.x,
+          y1: pA_3d.z,
+          x2: pB_3d.x,
+          y2: pB_3d.z,
+          thickness,
+          height: wallHeightMeters,
+        });
+      }
+
+      if (arcSegments.length > 0) {
+        const arcGroup = generate3DFrom2DWalls(arcSegments);
+        arcGroup.name = `ArcWallMesh_${w.id}`;
+        wallsGroup.add(arcGroup);
+      }
+      return;
+    }
 
     const p1_3d = to3DCoords(n1.x, n1.y);
     const p2_3d = to3DCoords(n2.x, n2.y);

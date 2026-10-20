@@ -852,3 +852,353 @@ export function getWallOpeningsBreakdown(
   };
 }
 
+/**
+ * CAD Arc Geometry Types and Helpers
+ */
+export interface ArcInfo {
+  center: Point;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+  counterClockwise: boolean;
+  arcLength: number;
+  midPoint: Point;
+  isCollinear?: boolean;
+}
+
+/**
+ * Normalize angle to [0, 2π)
+ */
+function normalizeAngle(a: number): number {
+  return ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+}
+
+/**
+ * Computes circle center, radius, startAngle, endAngle, and counterClockwise flag
+ * for an arc defined by 3 points (Start, Point-on-curve, End).
+ * Handles collinear points safely.
+ */
+export function calculateArcFrom3Points(p1: Point, p2: Point, p3: Point): ArcInfo {
+  const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+
+  // Check collinearity
+  if (Math.abs(d) < 1e-4) {
+    const mx = (p1.x + p3.x) / 2;
+    const my = (p1.y + p3.y) / 2;
+    const chordLen = getDistance(p1, p3);
+    const a1 = Math.atan2(p1.y - my, p1.x - mx);
+    const a3 = Math.atan2(p3.y - my, p3.x - mx);
+    return {
+      center: { x: mx, y: my },
+      radius: chordLen / 2,
+      startAngle: a1,
+      endAngle: a3,
+      counterClockwise: false,
+      arcLength: chordLen,
+      midPoint: { x: (p1.x + p3.x) / 2, y: (p1.y + p3.y) / 2 },
+      isCollinear: true,
+    };
+  }
+
+  const p1Sq = p1.x * p1.x + p1.y * p1.y;
+  const p2Sq = p2.x * p2.x + p2.y * p2.y;
+  const p3Sq = p3.x * p3.x + p3.y * p3.y;
+
+  const cx =
+    (p1Sq * (p2.y - p3.y) + p2Sq * (p3.y - p1.y) + p3Sq * (p1.y - p2.y)) / d;
+  const cy =
+    (p1Sq * (p3.x - p2.x) + p2Sq * (p1.x - p3.x) + p3Sq * (p2.x - p1.x)) / d;
+  const radius = Math.hypot(p1.x - cx, p1.y - cy);
+
+  const a1 = Math.atan2(p1.y - cy, p1.x - cx);
+  const a2 = Math.atan2(p2.y - cy, p2.x - cx);
+  const a3 = Math.atan2(p3.y - cy, p3.x - cx);
+
+  const a1N = normalizeAngle(a1);
+  const a2N = normalizeAngle(a2);
+  const a3N = normalizeAngle(a3);
+
+  let ccwSweep = a3N - a1N;
+  if (ccwSweep < 0) ccwSweep += 2 * Math.PI;
+  let ccwPass = a2N - a1N;
+  if (ccwPass < 0) ccwPass += 2 * Math.PI;
+
+  // In HTML canvas, counterClockwise=false means increasing angle.
+  // If ccwPass < ccwSweep, increasing angle from a1 reaches a2 before a3.
+  const counterClockwise = !(ccwPass < ccwSweep);
+
+  const sweep = counterClockwise
+    ? a1 - a3 > 0
+      ? a1 - a3
+      : a1 - a3 + 2 * Math.PI
+    : a3 - a1 > 0
+    ? a3 - a1
+    : a3 - a1 + 2 * Math.PI;
+
+  const arcLength = radius * sweep;
+
+  return {
+    center: { x: cx, y: cy },
+    radius,
+    startAngle: a1,
+    endAngle: a3,
+    counterClockwise,
+    arcLength,
+    midPoint: { x: p2.x, y: p2.y },
+    isCollinear: false,
+  };
+}
+
+/**
+ * Computes arc from Start point, End point, and Radius.
+ * Clamps radius to at least half the chord length (d / 2).
+ */
+export function calculateArcFromStartEndRadius(
+  p1: Point,
+  p2: Point,
+  radius: number,
+  flipSide: boolean = false
+): ArcInfo {
+  const d = getDistance(p1, p2);
+  if (d < 1e-4) {
+    return {
+      center: { ...p1 },
+      radius: 0,
+      startAngle: 0,
+      endAngle: 0,
+      counterClockwise: false,
+      arcLength: 0,
+      midPoint: { ...p1 },
+    };
+  }
+
+  // Clamping radius to at least half the chord length (d / 2)
+  const clampedRadius = Math.max(radius, d / 2 + 1e-4);
+
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+  const h = Math.sqrt(
+    Math.max(0, clampedRadius * clampedRadius - (d / 2) * (d / 2))
+  );
+
+  const dx = (p2.x - p1.x) / d;
+  const dy = (p2.y - p1.y) / d;
+  const nx = -dy;
+  const ny = dx;
+
+  const sign = flipSide ? -1 : 1;
+  const cx = mx + sign * h * nx;
+  const cy = my + sign * h * ny;
+
+  const a1 = Math.atan2(p1.y - cy, p1.x - cx);
+  const a2 = Math.atan2(p2.y - cy, p2.x - cx);
+
+  // Midpoint apex on arc
+  const distCenterToMid = Math.hypot(mx - cx, my - cy);
+  const dirMidX = distCenterToMid > 1e-6 ? (mx - cx) / distCenterToMid : nx;
+  const dirMidY = distCenterToMid > 1e-6 ? (my - cy) / distCenterToMid : ny;
+  const apex = {
+    x: cx + clampedRadius * dirMidX,
+    y: cy + clampedRadius * dirMidY,
+  };
+
+  const apexAngle = Math.atan2(apex.y - cy, apex.x - cx);
+  const a1N = normalizeAngle(a1);
+  const a2N = normalizeAngle(a2);
+  const aApexN = normalizeAngle(apexAngle);
+
+  let ccwSweep = a2N - a1N;
+  if (ccwSweep < 0) ccwSweep += 2 * Math.PI;
+  let ccwPass = aApexN - a1N;
+  if (ccwPass < 0) ccwPass += 2 * Math.PI;
+
+  const counterClockwise = !(ccwPass < ccwSweep);
+
+  const sweep = counterClockwise
+    ? a1 - a2 > 0
+      ? a1 - a2
+      : a1 - a2 + 2 * Math.PI
+    : a2 - a1 > 0
+    ? a2 - a1
+    : a2 - a1 + 2 * Math.PI;
+
+  const arcLength = clampedRadius * sweep;
+
+  return {
+    center: { x: cx, y: cy },
+    radius: clampedRadius,
+    startAngle: a1,
+    endAngle: a2,
+    counterClockwise,
+    arcLength,
+    midPoint: apex,
+    isCollinear: false,
+  };
+}
+
+/**
+ * Dynamically computes an arc from Start point, End point, and mouse position
+ * adjusting curvature/radius smoothly as the mouse moves.
+ */
+export function calculateArcFromStartEndMouse(
+  p1: Point,
+  p2: Point,
+  mousePos: Point
+): ArcInfo {
+  const d = getDistance(p1, p2);
+  if (d < 1e-4) {
+    return {
+      center: { ...p1 },
+      radius: 0,
+      startAngle: 0,
+      endAngle: 0,
+      counterClockwise: false,
+      arcLength: 0,
+      midPoint: { ...p1 },
+    };
+  }
+
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+  const dx = (p2.x - p1.x) / d;
+  const dy = (p2.y - p1.y) / d;
+  const nx = -dy;
+  const ny = dx;
+
+  // Cross product / signed distance of mouse from chord line
+  const cross =
+    (p2.x - p1.x) * (mousePos.y - p1.y) - (p2.y - p1.y) * (mousePos.x - p1.x);
+  const sagitta = Math.max(1.5, Math.abs(cross) / d);
+  const half = d / 2;
+
+  // Radius from sagitta h and half chord: R = (h^2 + (d/2)^2) / (2h)
+  const radius = (sagitta * sagitta + half * half) / (2 * sagitta);
+
+  // Normal towards mouse
+  const dotNorm = (mousePos.x - mx) * nx + (mousePos.y - my) * ny;
+  const sign = dotNorm >= 0 ? 1 : -1;
+  const normX = nx * sign;
+  const normY = ny * sign;
+
+  const apex = {
+    x: mx + sagitta * normX,
+    y: my + sagitta * normY,
+  };
+
+  const cx = apex.x - radius * normX;
+  const cy = apex.y - radius * normY;
+
+  const a1 = Math.atan2(p1.y - cy, p1.x - cx);
+  const a2 = Math.atan2(p2.y - cy, p2.x - cx);
+  const aApex = Math.atan2(apex.y - cy, apex.x - cx);
+
+  const a1N = normalizeAngle(a1);
+  const a2N = normalizeAngle(a2);
+  const aApexN = normalizeAngle(aApex);
+
+  let ccwSweep = a2N - a1N;
+  if (ccwSweep < 0) ccwSweep += 2 * Math.PI;
+  let ccwPass = aApexN - a1N;
+  if (ccwPass < 0) ccwPass += 2 * Math.PI;
+
+  const counterClockwise = !(ccwPass < ccwSweep);
+
+  const sweep = counterClockwise
+    ? a1 - a2 > 0
+      ? a1 - a2
+      : a1 - a2 + 2 * Math.PI
+    : a2 - a1 > 0
+    ? a2 - a1
+    : a2 - a1 + 2 * Math.PI;
+
+  const arcLength = radius * sweep;
+
+  return {
+    center: { x: cx, y: cy },
+    radius,
+    startAngle: a1,
+    endAngle: a2,
+    counterClockwise,
+    arcLength,
+    midPoint: apex,
+    isCollinear: false,
+  };
+}
+
+/**
+ * Samples N points along an arc for rendering and smooth 3D extrusion
+ */
+export function sampleArcPoints(
+  arc: {
+    center: Point;
+    radius: number;
+    startAngle: number;
+    endAngle: number;
+    counterClockwise: boolean;
+  },
+  numSegments: number = 20
+): Point[] {
+  const points: Point[] = [];
+  const { center, radius, startAngle, endAngle, counterClockwise } = arc;
+
+  const sweep = counterClockwise
+    ? startAngle - endAngle > 0
+      ? startAngle - endAngle
+      : startAngle - endAngle + 2 * Math.PI
+    : endAngle - startAngle > 0
+    ? endAngle - startAngle
+    : endAngle - startAngle + 2 * Math.PI;
+
+  const step = sweep / numSegments;
+  const dir = counterClockwise ? -1 : 1;
+
+  for (let i = 0; i <= numSegments; i++) {
+    const angle = startAngle + dir * i * step;
+    points.push({
+      x: center.x + radius * Math.cos(angle),
+      y: center.y + radius * Math.sin(angle),
+    });
+  }
+
+  return points;
+}
+
+/**
+ * Hit test: Check if a point is within threshold distance of an arc wall
+ */
+export function isPointNearArc(
+  p: Point,
+  arc: {
+    center: Point;
+    radius: number;
+    startAngle: number;
+    endAngle: number;
+    counterClockwise: boolean;
+  },
+  threshold: number
+): boolean {
+  const distToCenter = Math.hypot(p.x - arc.center.x, p.y - arc.center.y);
+  if (Math.abs(distToCenter - arc.radius) > threshold) {
+    return false;
+  }
+
+  const angle = Math.atan2(p.y - arc.center.y, p.x - arc.center.x);
+  const a1N = normalizeAngle(arc.startAngle);
+  const a2N = normalizeAngle(arc.endAngle);
+  const aN = normalizeAngle(angle);
+
+  if (arc.counterClockwise) {
+    let sweep = a1N - a2N;
+    if (sweep < 0) sweep += 2 * Math.PI;
+    let pass = a1N - aN;
+    if (pass < 0) pass += 2 * Math.PI;
+    return pass <= sweep + 0.05;
+  } else {
+    let sweep = a2N - a1N;
+    if (sweep < 0) sweep += 2 * Math.PI;
+    let pass = aN - a1N;
+    if (pass < 0) pass += 2 * Math.PI;
+    return pass <= sweep + 0.05;
+  }
+}
+

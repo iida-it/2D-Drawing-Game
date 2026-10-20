@@ -1753,10 +1753,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     // 2F: Cursor Snapping Crosshairs
     if (
       activeTool === 'wall' ||
+      activeTool === 'arc-3pt' ||
+      activeTool === 'arc-radius' ||
       activeTool === 'measure' ||
       activeTool === 'calibrate' ||
-      activeTool === 'door' ||
-      activeTool === 'window'
+      isOpeningTool(activeTool)
     ) {
       const processed = getProcessedPoint(cursorWorldPos, activeDrawingNode);
       if (processed.snappedNode) {
@@ -2130,13 +2131,32 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       let foundWall: Wall | null = null;
 
       for (const w of walls) {
-        const n1 = nodeMap.get(w.startNodeId);
-        const n2 = nodeMap.get(w.endNodeId);
-        if (n1 && n2) {
-          const distToSeg = distanceToSegment(world, n1, n2);
-          if (distToSeg < 10 / zoom) {
+        if (w.isArc && w.arcCenter && w.arcRadius) {
+          if (
+            isPointNearArc(
+              world,
+              {
+                center: w.arcCenter,
+                radius: w.arcRadius,
+                startAngle: w.arcStartAngle || 0,
+                endAngle: w.arcEndAngle || Math.PI,
+                counterClockwise: w.arcCcw || false,
+              },
+              10 / zoom
+            )
+          ) {
             foundWall = w;
             break;
+          }
+        } else {
+          const n1 = nodeMap.get(w.startNodeId);
+          const n2 = nodeMap.get(w.endNodeId);
+          if (n1 && n2) {
+            const distToSeg = distanceToSegment(world, n1, n2);
+            if (distToSeg < 10 / zoom) {
+              foundWall = w;
+              break;
+            }
           }
         }
       }
@@ -2248,8 +2268,8 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       return;
     }
 
-    // 2. WALL DRAFTING TOOL
-    if (activeTool === 'wall') {
+    // 2. WALL / ARC DRAFTING TOOL
+    if (activeTool === 'wall' || activeTool === 'arc-3pt' || activeTool === 'arc-radius') {
       const processed = getProcessedPoint(world, activeDrawingNode);
       const clickedPoint = processed.point;
 
@@ -2388,7 +2408,28 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         walls.forEach((w) => {
           const n1 = nodeMap.get(w.startNodeId);
           const n2 = nodeMap.get(w.endNodeId);
-          if (n1 && n2 && doesSegmentIntersectBox(n1, n2, minX, maxX, minY, maxY)) {
+          if (w.isArc && w.arcCenter && w.arcRadius) {
+            const arcPts = sampleArcPoints(
+              {
+                center: w.arcCenter,
+                radius: w.arcRadius,
+                startAngle: w.arcStartAngle || 0,
+                endAngle: w.arcEndAngle || Math.PI,
+                counterClockwise: w.arcCcw || false,
+              },
+              10
+            );
+            const intersects = arcPts.some(
+              (p) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
+            );
+            if (intersects) {
+              matchedWallIds.push(w.id);
+            }
+          } else if (
+            n1 &&
+            n2 &&
+            doesSegmentIntersectBox(n1, n2, minX, maxX, minY, maxY)
+          ) {
             matchedWallIds.push(w.id);
           }
         });
@@ -2520,7 +2561,13 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (isMarqueeDragging) {
       return 'cursor-crosshair';
     }
-    if (activeTool === 'wall' || activeTool === 'measure' || activeTool === 'calibrate') {
+    if (
+      activeTool === 'wall' ||
+      activeTool === 'arc-3pt' ||
+      activeTool === 'arc-radius' ||
+      activeTool === 'measure' ||
+      activeTool === 'calibrate'
+    ) {
       return 'cursor-crosshair';
     }
     if (isOpeningTool(activeTool)) {
@@ -2647,6 +2694,14 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
               ? activeDrawingNode
                 ? 'Click to place next corner · Esc to finish'
                 : 'Click to start drafting wall'
+              : activeTool === 'arc-3pt'
+              ? activeDrawingNode
+                ? 'Click next point on arc · Esc to finish'
+                : 'Click 3 points (Start, Crest, End) to draft Arc Wall'
+              : activeTool === 'arc-radius'
+              ? activeDrawingNode
+                ? 'Click end point & set radius · Esc to finish'
+                : 'Click Start, End & set radius for Arc Wall'
               : activeTool === 'door'
               ? hoveredOpeningWall
                 ? 'Click wall to place Single Door · F to flip swing'

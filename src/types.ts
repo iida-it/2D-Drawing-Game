@@ -14,6 +14,13 @@ export interface Wall {
   startNodeId: string;
   endNodeId: string;
   thickness?: number; // In meters, default 0.15m (15cm)
+  isArc?: boolean;
+  arcCenter?: Point;
+  arcRadius?: number; // In world coordinate units (pixels)
+  arcStartAngle?: number; // In radians
+  arcEndAngle?: number; // In radians
+  arcCcw?: boolean; // Counter-clockwise flag
+  arcMidPoint?: Point; // Intermediate / apex point on curve
 }
 
 export type RoomType = 'living' | 'bedroom' | 'kitchen' | 'bathroom' | 'office' | 'dining';
@@ -38,6 +45,8 @@ export type OpeningType = 'door' | 'double-door' | 'sliding-door' | 'window';
 export type ToolType =
   | 'select'
   | 'wall'
+  | 'arc-3pt'
+  | 'arc-radius'
   | 'door'
   | 'double-door'
   | 'sliding-door'
