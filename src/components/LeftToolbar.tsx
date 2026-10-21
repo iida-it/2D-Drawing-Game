@@ -74,7 +74,9 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
   // Flyout Popover state
   const [openFlyout, setOpenFlyout] = useState<'openings' | 'arc' | null>(null);
   const [selectedOpeningTool, setSelectedOpeningTool] = useState<OpeningType>('door');
-  const [selectedArcTool, setSelectedArcTool] = useState<'arc-3pt' | 'arc-radius'>('arc-3pt');
+  const [selectedArcTool, setSelectedArcTool] = useState<
+    'arc-3pt' | 'arc-ser' | 'arc-radius'
+  >('arc-3pt');
 
   // Sync active opening / arc tool to the main button icon & badge
   useEffect(() => {
@@ -86,7 +88,11 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     ) {
       setSelectedOpeningTool(activeTool);
     }
-    if (activeTool === 'arc-3pt' || activeTool === 'arc-radius') {
+    if (
+      activeTool === 'arc-3pt' ||
+      activeTool === 'arc-ser' ||
+      activeTool === 'arc-radius'
+    ) {
       setSelectedArcTool(activeTool);
     }
   }, [activeTool]);
@@ -142,7 +148,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
 
   // Arc Wall / Curve Flyout Options List
   const arcItems: {
-    id: 'arc-3pt' | 'arc-radius';
+    id: 'arc-3pt' | 'arc-ser' | 'arc-radius';
     label: string;
     sublabel?: string;
     shortcut: string;
@@ -156,7 +162,7 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
       icon: Arc3PtIcon,
     },
     {
-      id: 'arc-radius',
+      id: 'arc-ser',
       label: t('toolArcRadius'),
       sublabel: t('toolArcRadiusSub'),
       shortcut: 'R',
@@ -170,7 +176,10 @@ export const LeftToolbar: React.FC<LeftToolbarProps> = ({
     activeTool === 'sliding-door' ||
     activeTool === 'window';
 
-  const isArcActive = activeTool === 'arc-3pt' || activeTool === 'arc-radius';
+  const isArcActive =
+    activeTool === 'arc-3pt' ||
+    activeTool === 'arc-ser' ||
+    activeTool === 'arc-radius';
 
   const currentOpening =
     openingItems.find((o) => o.id === selectedOpeningTool) || openingItems[0];

@@ -30,6 +30,7 @@ import {
   calculateArcFromStartEndMouse,
   sampleArcPoints,
   isPointNearArc,
+  ArcInfo,
 } from '../utils/geometry';
 import { soundEngine } from '../utils/audio';
 import { Check, X, Pencil } from 'lucide-react';
@@ -201,6 +202,19 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   const dimensionInputRef = useRef<HTMLInputElement | null>(null);
   const isCancellingRef = useRef<boolean>(false);
 
+  // Arc Wall Drafting State
+  const [arcDraft, setArcDraft] = useState<{
+    tool: 'arc-3pt' | 'arc-ser' | 'arc-radius';
+    p1: Node;
+    p2?: Node;
+    typedRadius?: string;
+    flipSide?: boolean;
+  } | null>(null);
+
+  // Interactive Midpoint Curve Handle for Selected Wall
+  const [draggingMidHandleWallId, setDraggingMidHandleWallId] = useState<string | null>(null);
+  const [hoveredMidHandleWallId, setHoveredMidHandleWallId] = useState<string | null>(null);
+
   // Update closed rooms whenever geometry changes
   useEffect(() => {
     const rooms = detectClosedRooms(nodes, walls, settings.scaleFactor, customRoomTypes);
@@ -210,6 +224,9 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   // Cleanly reset active drafting and measuring state when active tool changes
   useEffect(() => {
     setActiveDrawingNode(null);
+    setArcDraft(null);
+    setDraggingMidHandleWallId(null);
+    setHoveredMidHandleWallId(null);
     setMeasureStartPoint(null);
     setCalibratePointA(null);
     setIsMarqueeDragging(false);
@@ -256,7 +273,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
   }, [activeEditingDimension]);
 
-  // Helper to compute badge position and metrics for any wall
+  // Helper to compute badge position and metrics for any wall (straight or arc)
   const getWallDimensionBadge = useCallback(
     (w: Wall): {
       wall: Wall;
@@ -264,12 +281,48 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       n2: Node;
       currentLengthMeters: number;
       centerWorld: Point;
+      isArc?: boolean;
     } | null => {
       const nodeMap = new Map<string, Node>();
       nodes.forEach((n) => nodeMap.set(n.id, n));
       const n1 = nodeMap.get(w.startNodeId);
       const n2 = nodeMap.get(w.endNodeId);
       if (!n1 || !n2) return null;
+
+      const arcRadius = w.radius ?? w.arcRadius;
+      const arcCenter =
+        w.cx !== undefined && w.cy !== undefined
+          ? { x: w.cx, y: w.cy }
+          : w.arcCenter;
+      const isArcWall = Boolean(w.isArc || (arcRadius && arcCenter));
+
+      if (isArcWall && arcRadius && arcCenter) {
+        const rMeters = pixelsToMeters(arcRadius, settings.scaleFactor);
+        const sa = w.startAngle ?? w.arcStartAngle ?? 0;
+        const ea = w.endAngle ?? w.arcEndAngle ?? Math.PI;
+        const ccw = w.counterClockwise ?? w.arcCcw ?? false;
+
+        let midAngle = (sa + ea) / 2;
+        if (ccw) {
+          if (ea > sa) midAngle += Math.PI;
+        } else {
+          if (sa > ea) midAngle += Math.PI;
+        }
+
+        const apex: Point = w.arcMidPoint || w.controlPoint || {
+          x: arcCenter.x + arcRadius * Math.cos(midAngle),
+          y: arcCenter.y + arcRadius * Math.sin(midAngle),
+        };
+
+        return {
+          wall: w,
+          n1,
+          n2,
+          currentLengthMeters: rMeters,
+          centerWorld: { x: apex.x, y: apex.y - 14 / zoom },
+          isArc: true,
+        };
+      }
 
       const dx = n2.x - n1.x;
       const dy = n2.y - n1.y;
@@ -298,6 +351,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         n2,
         currentLengthMeters: wallDistMeters,
         centerWorld: badgeWorld,
+        isArc: false,
       };
     },
     [nodes, openings, settings.scaleFactor, zoom]
@@ -311,6 +365,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
       // Cancel any in-progress drawing chain when editing dimension
       setActiveDrawingNode(null);
+      setArcDraft(null);
 
       onSelectWall(wall.id);
       setSelectedWallIds([wall.id]);
@@ -364,7 +419,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     [getWallDimensionBadge, selectedWallId, walls, worldToScreen]
   );
 
-  // Commit new wall dimension using unit vector scaling formula
+  // Commit new wall dimension (supporting both straight wall length and arc wall radius)
   const handleDimensionSubmit = useCallback(() => {
     if (!activeEditingDimension) return;
     if (isCancellingRef.current) {
@@ -375,13 +430,50 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     const cleanStr = dimensionInputValue.trim().replace(',', '.').replace(/[^\d.-]/g, '');
     const newLength = parseFloat(cleanStr);
-    const { startNodeId, endNodeId, currentLengthMeters } = activeEditingDimension;
+    const { wallId, startNodeId, endNodeId, currentLengthMeters } = activeEditingDimension;
 
+    const targetWall = walls.find((w) => w.id === wallId);
     const nodeMap = new Map<string, Node>();
     nodes.forEach((n) => nodeMap.set(n.id, n));
     const n1 = nodeMap.get(startNodeId);
     const n2 = nodeMap.get(endNodeId);
 
+    // If target wall is an Arc Wall: update its radius!
+    const isArcWall = Boolean(
+      targetWall && (targetWall.isArc || targetWall.radius || targetWall.arcRadius)
+    );
+
+    if (isArcWall && targetWall && n1 && n2 && !isNaN(newLength) && newLength > 0.05) {
+      const newRadiusPx = metersToPixels(newLength, settings.scaleFactor);
+      const ccw = targetWall.counterClockwise ?? targetWall.arcCcw ?? false;
+      const updatedArc = calculateArcFromStartEndRadius(n1, n2, newRadiusPx, ccw);
+      if (onUpdateWall) {
+        onUpdateWall(targetWall.id, {
+          isArc: true,
+          arcMode: targetWall.arcMode || 'radius',
+          arcCenter: updatedArc.center,
+          cx: updatedArc.center.x,
+          cy: updatedArc.center.y,
+          arcRadius: updatedArc.radius,
+          radius: updatedArc.radius,
+          arcStartAngle: updatedArc.startAngle,
+          startAngle: updatedArc.startAngle,
+          arcEndAngle: updatedArc.endAngle,
+          endAngle: updatedArc.endAngle,
+          arcCcw: updatedArc.counterClockwise,
+          counterClockwise: updatedArc.counterClockwise,
+          arcMidPoint: updatedArc.midPoint,
+          controlPoint: updatedArc.midPoint,
+        });
+      }
+      soundEngine.playSnapSound();
+      setActiveEditingDimension(null);
+      return;
+    }
+
+    // Straight Wall length adjustment formula:
+    // x2_new = x1 + (x2 - x1) / currentLength * newLength
+    // y2_new = y1 + (y2 - y1) / currentLength * newLength
     if (
       n1 &&
       n2 &&
@@ -390,9 +482,6 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       newLength < 250 &&
       currentLengthMeters > 1e-4
     ) {
-      // Formula specified by user request:
-      // x2_new = x1 + (x2 - x1) / currentLength * newLength
-      // y2_new = y1 + (y2 - y1) / currentLength * newLength
       const x1 = n1.x;
       const y1 = n1.y;
       const x2 = n2.x;
@@ -406,7 +495,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
 
     setActiveEditingDimension(null);
-  }, [activeEditingDimension, dimensionInputValue, nodes, onUpdateNodePosition]);
+  }, [
+    activeEditingDimension,
+    dimensionInputValue,
+    nodes,
+    walls,
+    settings.scaleFactor,
+    onUpdateNodePosition,
+    onUpdateWall,
+  ]);
 
   // Handle key down in inline dimension input
   const handleDimensionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -474,6 +571,69 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     },
     [nodes, zoom, settings.orthoSnapping, isShiftPressed, settings.snapToGrid, settings.gridSizeMeters, settings.scaleFactor]
   );
+
+  // Helper to commit in-progress arc draft
+  const commitCurrentArcDraft = useCallback(() => {
+    if (!arcDraft || !arcDraft.p2) return;
+    const { tool, p1, p2, typedRadius, flipSide } = arcDraft;
+    let arc: ArcInfo;
+
+    if (typedRadius && !isNaN(parseFloat(typedRadius)) && parseFloat(typedRadius) > 0) {
+      const rMeters = parseFloat(typedRadius);
+      const rPx = metersToPixels(rMeters, settings.scaleFactor);
+      arc = calculateArcFromStartEndRadius(p1, p2, rPx, flipSide || false);
+    } else if (tool === 'arc-3pt') {
+      arc = calculateArcFrom3Points(p1, p2, cursorWorldPos);
+    } else {
+      arc = calculateArcFromStartEndMouse(p1, p2, cursorWorldPos);
+    }
+
+    let endNode: Node;
+    if (tool === 'arc-3pt') {
+      const nodeMap = new Map<string, Node>();
+      nodes.forEach((n) => nodeMap.set(n.id, n));
+      const processed = getProcessedPoint(cursorWorldPos, p1);
+      if (processed.snappedNode) {
+        endNode = processed.snappedNode;
+      } else {
+        endNode = {
+          id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          x: processed.point.x,
+          y: processed.point.y,
+        };
+      }
+    } else {
+      endNode = p2;
+    }
+
+    onAddWall(p1, endNode, {
+      isArc: true,
+      arcMode: tool === 'arc-3pt' ? '3pt' : 'ser',
+      arcCenter: arc.center,
+      cx: arc.center.x,
+      cy: arc.center.y,
+      arcRadius: arc.radius,
+      radius: arc.radius,
+      arcStartAngle: arc.startAngle,
+      startAngle: arc.startAngle,
+      arcEndAngle: arc.endAngle,
+      endAngle: arc.endAngle,
+      arcCcw: arc.counterClockwise,
+      counterClockwise: arc.counterClockwise,
+      arcMidPoint: arc.midPoint,
+      controlPoint: arc.midPoint,
+    });
+
+    setArcDraft(null);
+    soundEngine.playWallComplete();
+  }, [
+    arcDraft,
+    cursorWorldPos,
+    nodes,
+    getProcessedPoint,
+    onAddWall,
+    settings.scaleFactor,
+  ]);
 
   // Handle Resize and Canvas Rendering
   useEffect(() => {
@@ -818,7 +978,90 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       const isHovered = hoveredWall?.id === w.id;
       const wallOpenings = openings.filter((o) => o.wallId === w.id);
 
-      if (wallOpenings.length === 0) {
+      const arcRadius = w.radius ?? w.arcRadius;
+      const arcCenter =
+        w.cx !== undefined && w.cy !== undefined
+          ? { x: w.cx, y: w.cy }
+          : w.arcCenter;
+      const isArcWall = Boolean(w.isArc || (arcRadius && arcCenter));
+
+      if (isArcWall && arcRadius && arcCenter) {
+        // CURVED ARC WALL RENDERING
+        const sa = w.startAngle ?? w.arcStartAngle ?? 0;
+        const ea = w.endAngle ?? w.arcEndAngle ?? Math.PI;
+        const ccw = w.counterClockwise ?? w.arcCcw ?? false;
+
+        // Outer curved wall stroke
+        ctx.beginPath();
+        ctx.arc(arcCenter.x, arcCenter.y, arcRadius, sa, ea, ccw);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = isSelected
+          ? '#0284c7'
+          : isHovered
+          ? '#334155'
+          : '#1e293b';
+        ctx.lineWidth = wallThicknessPx;
+        ctx.stroke();
+
+        // Wall inner core highlight
+        ctx.beginPath();
+        ctx.arc(arcCenter.x, arcCenter.y, arcRadius, sa, ea, ccw);
+        ctx.strokeStyle = isSelected
+          ? '#38bdf8'
+          : isHovered
+          ? '#475569'
+          : '#334155';
+        ctx.lineWidth = Math.max(1, wallThicknessPx * 0.45);
+        ctx.stroke();
+
+        // Apex midpoint on curve
+        let midAngle = (sa + ea) / 2;
+        if (ccw) {
+          if (ea > sa) midAngle += Math.PI;
+        } else {
+          if (sa > ea) midAngle += Math.PI;
+        }
+
+        const apex: Point = w.arcMidPoint || w.controlPoint || {
+          x: arcCenter.x + arcRadius * Math.cos(midAngle),
+          y: arcCenter.y + arcRadius * Math.sin(midAngle),
+        };
+
+        // Dimension / Radius Badge on Arc Wall ('R = 2.50 m')
+        const rMeters = pixelsToMeters(arcRadius, settings.scaleFactor);
+        const isDimHovered = hoveredDimensionWallId === w.id;
+        const isDimEditing = activeEditingDimension?.wallId === w.id;
+        const dimText = isSelected ? `R = ${rMeters.toFixed(2)}m ✎` : `R = ${rMeters.toFixed(2)}m`;
+
+        ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+        const metrics = ctx.measureText(dimText);
+        const padX = 6 / zoom;
+        const padY = 3 / zoom;
+        const badgeW = metrics.width + padX * 2;
+        const badgeH = 16 / zoom;
+        const badgeX = apex.x - badgeW / 2;
+        const badgeY = apex.y - 16 / zoom - badgeH / 2;
+
+        ctx.fillStyle = isDimEditing
+          ? 'rgba(255, 255, 255, 0.3)'
+          : isSelected || isDimHovered
+          ? '#f0f9ff'
+          : '#ffffff';
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3 / zoom);
+        ctx.fill();
+        ctx.strokeStyle = isSelected || isDimHovered ? '#0284c7' : '#bae6fd';
+        ctx.lineWidth = (isSelected || isDimHovered ? 1.5 : 1) / zoom;
+        ctx.stroke();
+
+        if (!isDimEditing) {
+          ctx.fillStyle = isSelected || isDimHovered ? '#0369a1' : '#0284c7';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(dimText, apex.x, apex.y - 16 / zoom);
+        }
+      } else if (wallOpenings.length === 0) {
         // Continuous wall without openings
         ctx.beginPath();
         ctx.moveTo(n1.x, n1.y);
@@ -1371,6 +1614,60 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           }
         }
       }
+
+      // Render Draggable Blue Midpoint Curve Handle when wall is selected
+      if (isSelected) {
+        let handlePt: Point;
+        if (isArcWall && arcRadius && arcCenter) {
+          const sa = w.startAngle ?? w.arcStartAngle ?? 0;
+          const ea = w.endAngle ?? w.arcEndAngle ?? Math.PI;
+          const ccw = w.counterClockwise ?? w.arcCcw ?? false;
+          let midAngle = (sa + ea) / 2;
+          if (ccw) {
+            if (ea > sa) midAngle += Math.PI;
+          } else {
+            if (sa > ea) midAngle += Math.PI;
+          }
+          handlePt = w.arcMidPoint || w.controlPoint || {
+            x: arcCenter.x + arcRadius * Math.cos(midAngle),
+            y: arcCenter.y + arcRadius * Math.sin(midAngle),
+          };
+        } else {
+          handlePt = { x: (n1.x + n2.x) / 2, y: (n1.y + n2.y) / 2 };
+        }
+
+        const isHandleHovered = hoveredMidHandleWallId === w.id;
+        const isHandleDragging = draggingMidHandleWallId === w.id;
+
+        // Outer glow on hover or drag
+        if (isHandleHovered || isHandleDragging) {
+          ctx.beginPath();
+          ctx.arc(handlePt.x, handlePt.y, 11 / zoom, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(2, 132, 199, 0.25)';
+          ctx.fill();
+        }
+
+        // Draggable blue circular midpoint handle
+        ctx.beginPath();
+        ctx.arc(
+          handlePt.x,
+          handlePt.y,
+          (isHandleHovered || isHandleDragging ? 7.5 : 6) / zoom,
+          0,
+          Math.PI * 2
+        );
+        ctx.fillStyle = isHandleDragging ? '#0284c7' : isHandleHovered ? '#0ea5e9' : '#38bdf8';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 / zoom;
+        ctx.stroke();
+
+        // Inner center grip dot
+        ctx.beginPath();
+        ctx.arc(handlePt.x, handlePt.y, 2 / zoom, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
     });
 
     // 2C: Nodes (Junction Points)
@@ -1479,6 +1776,225 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         ctx.stroke();
         ctx.setLineDash([]);
       });
+    }
+
+    // 2D.2: Live Arc Wall Drafting Preview (3-Point Arc and Start-End-Radius Arc)
+    if (arcDraft) {
+      if (arcDraft.tool === 'arc-3pt') {
+        if (!arcDraft.p2) {
+          // Stage 1: P1 set, cursor is point on curve (or crest)
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 1.5 / zoom;
+          ctx.setLineDash([4 / zoom, 4 / zoom]);
+          ctx.beginPath();
+          ctx.moveTo(arcDraft.p1.x, arcDraft.p1.y);
+          ctx.lineTo(cursorWorldPos.x, cursorWorldPos.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.beginPath();
+          ctx.arc(arcDraft.p1.x, arcDraft.p1.y, 5 / zoom, 0, Math.PI * 2);
+          ctx.fillStyle = '#0284c7';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5 / zoom;
+          ctx.stroke();
+
+          const midX = (arcDraft.p1.x + cursorWorldPos.x) / 2;
+          const midY = (arcDraft.p1.y + cursorWorldPos.y) / 2;
+          const distM = pixelsToMeters(getDistance(arcDraft.p1, cursorWorldPos), settings.scaleFactor);
+          const badgeText = `Point 1 Set (${distM.toFixed(2)}m) · Click Point 2 (Curve Crest)`;
+
+          ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+          const metrics = ctx.measureText(badgeText);
+          const bw = metrics.width + 16 / zoom;
+          const bh = 22 / zoom;
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.roundRect(midX - bw / 2, midY - 20 / zoom - bh / 2, bw, bh, 4 / zoom);
+          ctx.fill();
+          ctx.fillStyle = '#38bdf8';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(badgeText, midX, midY - 20 / zoom);
+        } else {
+          // Stage 2: P1 and P2 (Midpoint on curve) set, cursor is P3 (End point)
+          const arc = calculateArcFrom3Points(arcDraft.p1, arcDraft.p2, cursorWorldPos);
+          if (!arc.isCollinear && arc.radius > 0) {
+            // Live curved arc wall
+            ctx.beginPath();
+            ctx.arc(arc.center.x, arc.center.y, arc.radius, arc.startAngle, arc.endAngle, arc.counterClockwise);
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#0284c7';
+            ctx.lineWidth = wallThicknessPx;
+            ctx.stroke();
+
+            // Core highlight
+            ctx.beginPath();
+            ctx.arc(arc.center.x, arc.center.y, arc.radius, arc.startAngle, arc.endAngle, arc.counterClockwise);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = Math.max(1, wallThicknessPx * 0.45);
+            ctx.stroke();
+
+            // Faint radial dashed lines to circle center
+            ctx.strokeStyle = 'rgba(2, 132, 199, 0.4)';
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([3 / zoom, 3 / zoom]);
+            ctx.beginPath();
+            ctx.moveTo(arc.center.x, arc.center.y);
+            ctx.lineTo(arcDraft.p1.x, arcDraft.p1.y);
+            ctx.moveTo(arc.center.x, arc.center.y);
+            ctx.lineTo(cursorWorldPos.x, cursorWorldPos.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Markers at P1, P2 (crest), cursorWorldPos (end)
+            [arcDraft.p1, arcDraft.p2, cursorWorldPos].forEach((pt, idx) => {
+              ctx.beginPath();
+              ctx.arc(pt.x, pt.y, (idx === 1 ? 5 : 4) / zoom, 0, Math.PI * 2);
+              ctx.fillStyle = idx === 1 ? '#f59e0b' : '#0284c7';
+              ctx.fill();
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1.5 / zoom;
+              ctx.stroke();
+            });
+
+            // Badge with Radius and Arc Length
+            const rM = pixelsToMeters(arc.radius, settings.scaleFactor);
+            const arcLenM = pixelsToMeters(arc.arcLength, settings.scaleFactor);
+            const badgeText = `R = ${rM.toFixed(2)}m (Arc: ${arcLenM.toFixed(2)}m) · Click to Finalize`;
+
+            ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+            const metrics = ctx.measureText(badgeText);
+            const bw = metrics.width + 16 / zoom;
+            const bh = 22 / zoom;
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.roundRect(arc.midPoint.x - bw / 2, arc.midPoint.y - 20 / zoom - bh / 2, bw, bh, 4 / zoom);
+            ctx.fill();
+            ctx.fillStyle = '#38bdf8';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(badgeText, arc.midPoint.x, arc.midPoint.y - 20 / zoom);
+          }
+        }
+      } else {
+        // arc-ser / arc-radius
+        if (!arcDraft.p2) {
+          // Stage 1: P1 set, cursor is chord end
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 1.5 / zoom;
+          ctx.setLineDash([4 / zoom, 4 / zoom]);
+          ctx.beginPath();
+          ctx.moveTo(arcDraft.p1.x, arcDraft.p1.y);
+          ctx.lineTo(cursorWorldPos.x, cursorWorldPos.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.beginPath();
+          ctx.arc(arcDraft.p1.x, arcDraft.p1.y, 5 / zoom, 0, Math.PI * 2);
+          ctx.fillStyle = '#0284c7';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5 / zoom;
+          ctx.stroke();
+
+          const chordM = pixelsToMeters(getDistance(arcDraft.p1, cursorWorldPos), settings.scaleFactor);
+          const midX = (arcDraft.p1.x + cursorWorldPos.x) / 2;
+          const midY = (arcDraft.p1.y + cursorWorldPos.y) / 2;
+          const badgeText = `Chord: ${chordM.toFixed(2)}m · Click End Point`;
+
+          ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+          const metrics = ctx.measureText(badgeText);
+          const bw = metrics.width + 16 / zoom;
+          const bh = 22 / zoom;
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.roundRect(midX - bw / 2, midY - 20 / zoom - bh / 2, bw, bh, 4 / zoom);
+          ctx.fill();
+          ctx.fillStyle = '#38bdf8';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(badgeText, midX, midY - 20 / zoom);
+        } else {
+          // Stage 2: P1 & P2 set! Chord is fixed. Moving mouse bends curve!
+          let arc: ArcInfo;
+          if (arcDraft.typedRadius && !isNaN(parseFloat(arcDraft.typedRadius)) && parseFloat(arcDraft.typedRadius) > 0) {
+            const rPx = metersToPixels(parseFloat(arcDraft.typedRadius), settings.scaleFactor);
+            arc = calculateArcFromStartEndRadius(arcDraft.p1, arcDraft.p2, rPx, arcDraft.flipSide || false);
+          } else {
+            arc = calculateArcFromStartEndMouse(arcDraft.p1, arcDraft.p2, cursorWorldPos);
+          }
+
+          if (arc.radius > 0) {
+            // Live curved arc wall
+            ctx.beginPath();
+            ctx.arc(arc.center.x, arc.center.y, arc.radius, arc.startAngle, arc.endAngle, arc.counterClockwise);
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#0284c7';
+            ctx.lineWidth = wallThicknessPx;
+            ctx.stroke();
+
+            // Core highlight
+            ctx.beginPath();
+            ctx.arc(arc.center.x, arc.center.y, arc.radius, arc.startAngle, arc.endAngle, arc.counterClockwise);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = Math.max(1, wallThicknessPx * 0.45);
+            ctx.stroke();
+
+            // Dashed chord line between p1 and p2
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([3 / zoom, 3 / zoom]);
+            ctx.beginPath();
+            ctx.moveTo(arcDraft.p1.x, arcDraft.p1.y);
+            ctx.lineTo(arcDraft.p2.x, arcDraft.p2.y);
+
+            // Sagitta line from chord mid to apex
+            const chordMidX = (arcDraft.p1.x + arcDraft.p2.x) / 2;
+            const chordMidY = (arcDraft.p1.y + arcDraft.p2.y) / 2;
+            ctx.moveTo(chordMidX, chordMidY);
+            ctx.lineTo(arc.midPoint.x, arc.midPoint.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Markers at P1, P2
+            [arcDraft.p1, arcDraft.p2].forEach((pt) => {
+              ctx.beginPath();
+              ctx.arc(pt.x, pt.y, 4 / zoom, 0, Math.PI * 2);
+              ctx.fillStyle = '#0284c7';
+              ctx.fill();
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1.5 / zoom;
+              ctx.stroke();
+            });
+
+            // Center marker
+            ctx.beginPath();
+            ctx.arc(arc.center.x, arc.center.y, 3 / zoom, 0, Math.PI * 2);
+            ctx.fillStyle = '#f59e0b';
+            ctx.fill();
+
+            const rM = pixelsToMeters(arc.radius, settings.scaleFactor);
+            const badgeText = arcDraft.typedRadius
+              ? `⌨️ R = ${arcDraft.typedRadius}m (Press Enter · F to flip)`
+              : `R = ${rM.toFixed(2)}m · Click / Type R + Enter · F to flip`;
+
+            ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
+            const metrics = ctx.measureText(badgeText);
+            const bw = metrics.width + 16 / zoom;
+            const bh = 22 / zoom;
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.roundRect(arc.midPoint.x - bw / 2, arc.midPoint.y - 20 / zoom - bh / 2, bw, bh, 4 / zoom);
+            ctx.fill();
+            ctx.fillStyle = '#38bdf8';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(badgeText, arc.midPoint.x, arc.midPoint.y - 20 / zoom);
+          }
+        }
+      }
     }
 
     // 2E: Tape Measure Tool Live Render
@@ -1856,7 +2372,42 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         return;
       }
 
-      // Direct Type-to-Change Line Length:
+      // Direct typing for active Arc Wall drafting (radius input, Enter commit, F flip)
+      if (arcDraft && arcDraft.p2) {
+        if (/^[\d.]$/.test(e.key) || e.key === ',') {
+          e.preventDefault();
+          e.stopPropagation();
+          const char = e.key === ',' ? '.' : e.key;
+          setArcDraft((prev) =>
+            prev ? { ...prev, typedRadius: (prev.typedRadius || '') + char } : null
+          );
+          return;
+        }
+        if (e.key === 'Backspace' && arcDraft.typedRadius) {
+          e.preventDefault();
+          e.stopPropagation();
+          setArcDraft((prev) =>
+            prev ? { ...prev, typedRadius: prev.typedRadius?.slice(0, -1) } : null
+          );
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          commitCurrentArcDraft();
+          return;
+        }
+        if (e.key === 'f' || e.key === 'F') {
+          e.preventDefault();
+          e.stopPropagation();
+          setArcDraft((prev) =>
+            prev ? { ...prev, flipSide: !prev.flipSide } : null
+          );
+          return;
+        }
+      }
+
+      // Direct Type-to-Change Line Length / Arc Radius:
       // When any wall/line is selected, typing numbers ('0'-'9', '.', ',') immediately opens
       // the dimension editor pre-filled with that keystroke without requiring a click on the badge.
       if (
@@ -1900,6 +2451,11 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         if (activeEditingDimension) {
           isCancellingRef.current = true;
           setActiveEditingDimension(null);
+          return;
+        }
+        if (arcDraft) {
+          setArcDraft(null);
+          soundEngine.playPencilClick();
           return;
         }
         if (activeDrawingNode) {
@@ -1981,6 +2537,8 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     onDeleteOpening,
     onUpdateOpening,
     onSelectOpening,
+    arcDraft,
+    commitCurrentArcDraft,
   ]);
 
   // Mouse Wheel Zoom
@@ -2029,6 +2587,38 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     const world = screenToWorld(mouseScreenX, mouseScreenY);
     setCursorWorldPos(world);
+
+    // Handle Midpoint Curve Handle dragging for selected wall
+    if (draggingMidHandleWallId) {
+      const wall = walls.find((w) => w.id === draggingMidHandleWallId);
+      if (wall) {
+        const nodeMap = new Map<string, Node>();
+        nodes.forEach((n) => nodeMap.set(n.id, n));
+        const n1 = nodeMap.get(wall.startNodeId);
+        const n2 = nodeMap.get(wall.endNodeId);
+        if (n1 && n2 && onUpdateWall) {
+          const arc = calculateArcFromStartEndMouse(n1, n2, world);
+          onUpdateWall(wall.id, {
+            isArc: true,
+            arcMode: 'radius',
+            arcCenter: arc.center,
+            cx: arc.center.x,
+            cy: arc.center.y,
+            arcRadius: arc.radius,
+            radius: arc.radius,
+            arcStartAngle: arc.startAngle,
+            startAngle: arc.startAngle,
+            arcEndAngle: arc.endAngle,
+            endAngle: arc.endAngle,
+            arcCcw: arc.counterClockwise,
+            counterClockwise: arc.counterClockwise,
+            arcMidPoint: arc.midPoint,
+            controlPoint: arc.midPoint,
+          });
+        }
+      }
+      return;
+    }
 
     // Handle Marquee Box dragging in Select Tool
     if (isMarqueeDragging && marqueeStart) {
@@ -2180,6 +2770,51 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       setHoveredRoomId(null);
     }
 
+    // Detect hover on selected wall's midpoint curve handle
+    let foundMidHandleWallId: string | null = null;
+    const activeSelectedWallIds = selectedWallId
+      ? [selectedWallId]
+      : selectedWallIds;
+    for (const wId of activeSelectedWallIds) {
+      const sw = walls.find((w) => w.id === wId);
+      if (!sw) continue;
+      const n1 = nodeMap.get(sw.startNodeId);
+      const n2 = nodeMap.get(sw.endNodeId);
+      if (!n1 || !n2) continue;
+
+      const arcRadius = sw.radius ?? sw.arcRadius;
+      const arcCenter =
+        sw.cx !== undefined && sw.cy !== undefined
+          ? { x: sw.cx, y: sw.cy }
+          : sw.arcCenter;
+      const isArc = Boolean(sw.isArc || (arcRadius && arcCenter));
+
+      let handlePt: Point;
+      if (isArc && arcRadius && arcCenter) {
+        const sa = sw.startAngle ?? sw.arcStartAngle ?? 0;
+        const ea = sw.endAngle ?? sw.arcEndAngle ?? Math.PI;
+        const ccw = sw.counterClockwise ?? sw.arcCcw ?? false;
+        let midAngle = (sa + ea) / 2;
+        if (ccw) {
+          if (ea > sa) midAngle += Math.PI;
+        } else {
+          if (sa > ea) midAngle += Math.PI;
+        }
+        handlePt = sw.arcMidPoint || sw.controlPoint || {
+          x: arcCenter.x + arcRadius * Math.cos(midAngle),
+          y: arcCenter.y + arcRadius * Math.sin(midAngle),
+        };
+      } else {
+        handlePt = { x: (n1.x + n2.x) / 2, y: (n1.y + n2.y) / 2 };
+      }
+
+      if (getDistance(world, handlePt) <= 12 / zoom) {
+        foundMidHandleWallId = sw.id;
+        break;
+      }
+    }
+    setHoveredMidHandleWallId(foundMidHandleWallId);
+
     // Hover detection for wall dimension badges
     const badgeHit = checkDimensionBadgeClick(mouseScreenX, mouseScreenY);
     setHoveredDimensionWallId(badgeHit ? badgeHit.wall.id : null);
@@ -2210,8 +2845,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
     // Check if user clicked directly on a dimension label
     const hitBadge = checkDimensionBadgeClick(mouseScreenX, mouseScreenY);
-    if (hitBadge && !activeDrawingNode) {
+    if (hitBadge && !activeDrawingNode && !arcDraft) {
       openDimensionInputForWall(hitBadge.wall);
+      return;
+    }
+
+    // Check if user clicked on the draggable midpoint curve handle of a selected wall
+    if (hoveredMidHandleWallId) {
+      setDraggingMidHandleWallId(hoveredMidHandleWallId);
+      soundEngine.playPencilClick();
       return;
     }
 
@@ -2275,8 +2917,59 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       return;
     }
 
-    // 2. WALL / ARC DRAFTING TOOL
-    if (activeTool === 'wall' || activeTool === 'arc-3pt' || activeTool === 'arc-radius') {
+    // 2A. ARC WALL DRAFTING TOOLS ('arc-3pt', 'arc-ser', 'arc-radius')
+    const isArcTool =
+      activeTool === 'arc-3pt' ||
+      activeTool === 'arc-ser' ||
+      activeTool === 'arc-radius';
+
+    if (isArcTool) {
+      const processed = getProcessedPoint(world, arcDraft?.p1);
+      const clickedPoint = processed.point;
+
+      if (!arcDraft) {
+        // Step 1: Set Start Point (p1)
+        const startNode: Node = processed.snappedNode || {
+          id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          x: clickedPoint.x,
+          y: clickedPoint.y,
+        };
+        if (processed.snappedNode) soundEngine.playSnapSound();
+        else soundEngine.playPencilClick();
+
+        setArcDraft({
+          tool: activeTool === 'arc-3pt' ? 'arc-3pt' : 'arc-ser',
+          p1: startNode,
+        });
+        return;
+      }
+
+      if (arcDraft && !arcDraft.p2) {
+        // Step 2: Set Mid point on curve (arc-3pt) or End point of chord (arc-ser)
+        const secondNode: Node = processed.snappedNode || {
+          id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          x: clickedPoint.x,
+          y: clickedPoint.y,
+        };
+        if (processed.snappedNode) soundEngine.playSnapSound();
+        else soundEngine.playPencilClick();
+
+        setArcDraft({
+          ...arcDraft,
+          p2: secondNode,
+        });
+        return;
+      }
+
+      if (arcDraft && arcDraft.p2) {
+        // Step 3: Final Click -> Commit the curved wall!
+        commitCurrentArcDraft();
+        return;
+      }
+    }
+
+    // 2B. STRAIGHT WALL DRAFTING TOOL ('wall')
+    if (activeTool === 'wall') {
       const processed = getProcessedPoint(world, activeDrawingNode);
       const clickedPoint = processed.point;
 
@@ -2321,7 +3014,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           soundEngine.playPencilClick();
         }
 
-        // Add the wall segment!
+        // Add straight wall segment
         onAddWall(activeDrawingNode, endNode);
 
         // Check if we just closed a loop by connecting to an existing node
@@ -2395,6 +3088,35 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (draggingNodeId) {
       setDraggingNodeId(null);
       soundEngine.playPencilClick();
+    }
+    if (draggingMidHandleWallId) {
+      setDraggingMidHandleWallId(null);
+      soundEngine.playSnapSound();
+    }
+
+    // For Arc Tools: if user dragged to set the chord or mid point on first step, set p2 without committing!
+    // Do NOT finalize/commit the wall on the first mouseUp when activeTool is 'arc-3pt' or 'arc-ser'.
+    const isArcTool =
+      activeTool === 'arc-3pt' ||
+      activeTool === 'arc-ser' ||
+      activeTool === 'arc-radius';
+
+    if (isArcTool && arcDraft && !arcDraft.p2) {
+      const dist = getDistance(arcDraft.p1, cursorWorldPos);
+      if (dist > 18 / zoom) {
+        const processed = getProcessedPoint(cursorWorldPos, arcDraft.p1);
+        const secondNode: Node = processed.snappedNode || {
+          id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          x: processed.point.x,
+          y: processed.point.y,
+        };
+        setArcDraft({
+          ...arcDraft,
+          p2: secondNode,
+        });
+        soundEngine.playSnapSound();
+      }
+      return;
     }
 
     // Finish Marquee Box Drag Selection (Select Tool)
@@ -2525,11 +3247,15 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
   };
 
-  // Double Click finishes active wall chain
+  // Double Click finishes active wall chain or cancels arc draft
   const handleDoubleClick = () => {
     if (activeDrawingNode) {
       setActiveDrawingNode(null);
       soundEngine.playWallComplete();
+    }
+    if (arcDraft) {
+      setArcDraft(null);
+      soundEngine.playPencilClick();
     }
   };
 
@@ -2542,6 +3268,10 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
     if (activeDrawingNode) {
       setActiveDrawingNode(null);
+      soundEngine.playPencilClick();
+    }
+    if (arcDraft) {
+      setArcDraft(null);
       soundEngine.playPencilClick();
     }
     if (measureStartPoint) {
@@ -2559,6 +3289,12 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
 
   // Cursor style based on active tool and state
   const getCursorClass = () => {
+    if (draggingMidHandleWallId) {
+      return 'cursor-grabbing';
+    }
+    if (hoveredMidHandleWallId) {
+      return 'cursor-grab';
+    }
     if (hoveredDimensionWallId) {
       return 'cursor-pointer';
     }
@@ -2571,6 +3307,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     if (
       activeTool === 'wall' ||
       activeTool === 'arc-3pt' ||
+      activeTool === 'arc-ser' ||
       activeTool === 'arc-radius' ||
       activeTool === 'measure' ||
       activeTool === 'calibrate'
@@ -2702,13 +3439,17 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
                 ? 'Click to place next corner · Esc to finish'
                 : 'Click to start drafting wall'
               : activeTool === 'arc-3pt'
-              ? activeDrawingNode
-                ? 'Click next point on arc · Esc to finish'
-                : 'Click 3 points (Start, Crest, End) to draft Arc Wall'
-              : activeTool === 'arc-radius'
-              ? activeDrawingNode
-                ? 'Click end point & set radius · Esc to finish'
-                : 'Click Start, End & set radius for Arc Wall'
+              ? arcDraft
+                ? arcDraft.p2
+                  ? 'Click to finalize 3rd point · Esc to cancel'
+                  : 'Click 2nd point on curve (crest) · Esc to cancel'
+                : 'Click 1st point (Start) to draft 3-Point Arc Wall'
+              : activeTool === 'arc-ser' || activeTool === 'arc-radius'
+              ? arcDraft
+                ? arcDraft.p2
+                  ? 'Move mouse or type radius number + Enter to finalize · F to flip'
+                  : 'Click or drag 2nd point (Chord End) · Esc to cancel'
+                : 'Click 1st point (Start) to draft Start-End-Radius Arc Wall'
               : activeTool === 'door'
               ? hoveredOpeningWall
                 ? 'Click wall to place Single Door · F to flip swing'

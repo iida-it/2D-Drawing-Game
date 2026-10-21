@@ -432,17 +432,24 @@ export function build3DArchitecturalModel({
     const n2 = nodeMap.get(w.endNodeId);
     if (!n1 || !n2) return;
 
-    // Curved Arc Wall 3D Extrusion (Subdivide arc into 20 smooth segments)
-    if (w.isArc && w.arcCenter && w.arcRadius) {
+    // Curved Arc Wall 3D Extrusion (Subdivide arc into 24 smooth segments)
+    const arcRadius = w.radius ?? w.arcRadius;
+    const arcCenter =
+      w.cx !== undefined && w.cy !== undefined
+        ? { x: w.cx, y: w.cy }
+        : w.arcCenter;
+    const isArcWall = Boolean(w.isArc || (arcRadius && arcCenter));
+
+    if (isArcWall && arcCenter && arcRadius) {
       const arcPoints = sampleArcPoints(
         {
-          center: w.arcCenter,
-          radius: w.arcRadius,
-          startAngle: w.arcStartAngle ?? 0,
-          endAngle: w.arcEndAngle ?? Math.PI,
-          counterClockwise: w.arcCcw ?? false,
+          center: arcCenter,
+          radius: arcRadius,
+          startAngle: w.startAngle ?? w.arcStartAngle ?? 0,
+          endAngle: w.endAngle ?? w.arcEndAngle ?? Math.PI,
+          counterClockwise: w.counterClockwise ?? w.arcCcw ?? false,
         },
-        20
+        24
       );
 
       const thickness = w.thickness || wallThicknessMeters;
