@@ -25,6 +25,11 @@ import {
   isPointInPolygon,
   projectPointOntoSegment,
   getWallOpeningsBreakdown,
+  calculateArcFrom3Points,
+  calculateArcFromStartEndRadius,
+  calculateArcFromStartEndMouse,
+  sampleArcPoints,
+  isPointNearArc,
 } from '../utils/geometry';
 import { soundEngine } from '../utils/audio';
 import { Check, X, Pencil } from 'lucide-react';
@@ -45,7 +50,8 @@ interface Canvas2DProps {
   onSelectRoom?: (roomId: string | null) => void;
   customRoomTypes?: Record<string, RoomType>;
   onCycleRoomType?: (roomId: string) => void;
-  onAddWall: (startNode: Node, endNode: Node) => void;
+  onAddWall: (startNode: Node, endNode: Node, arcProps?: Partial<Wall>) => void;
+  onUpdateWall?: (wallId: string, updates: Partial<Wall>) => void;
   onAddOpening?: (
     wallId: string,
     type: OpeningType,
@@ -86,6 +92,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   customRoomTypes = {},
   onCycleRoomType,
   onAddWall,
+  onUpdateWall,
   onAddOpening,
   onUpdateOpening,
   onDeleteOpening,
@@ -2420,7 +2427,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
               10
             );
             const intersects = arcPts.some(
-              (p) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
+              (p: Point) => p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
             );
             if (intersects) {
               matchedWallIds.push(w.id);
