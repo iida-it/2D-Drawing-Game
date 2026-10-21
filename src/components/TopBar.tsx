@@ -344,10 +344,12 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <button
           onClick={onOpenShortcuts}
-          className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200/90 bg-white/95 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-all shadow-2xs hover:border-slate-300"
           title={t('shortcuts')}
         >
-          <HelpCircle className="w-4 h-4" />
+          <HelpCircle className="w-4 h-4 text-sky-600 shrink-0" />
+          <span className="hidden sm:inline whitespace-nowrap">{t('userGuideBtn')}</span>
+          <span className="sm:hidden font-bold text-sky-600">?</span>
         </button>
 
         {/* Submit Plan Button */}
