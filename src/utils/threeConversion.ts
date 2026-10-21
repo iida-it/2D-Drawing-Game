@@ -124,62 +124,87 @@ function createProceduralTileTexture(isMarble: boolean = false): THREE.CanvasTex
 }
 
 /**
- * Architectural Materials Library
+ * Architectural Materials Library - Singleton Cached Instances for Maximum Performance & Draw Call Optimization
  */
+let cachedArchitecturalMaterials: {
+  wallMaterial: THREE.MeshStandardMaterial;
+  cutawayWallMaterial: THREE.MeshStandardMaterial;
+  wallCapMaterial: THREE.MeshStandardMaterial;
+  doorWoodMaterial: THREE.MeshStandardMaterial;
+  doorHandleMaterial: THREE.MeshStandardMaterial;
+  windowFrameMaterial: THREE.MeshStandardMaterial;
+  glassMaterial: THREE.MeshStandardMaterial;
+} | null = null;
+
+const floorMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
+
 export function getArchitecturalMaterials() {
-  const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0xfdfdfd,
-    roughness: 0.7,
-    metalness: 0.05,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-  });
+  if (!cachedArchitecturalMaterials) {
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfdfdfd,
+      roughness: 0.7,
+      metalness: 0.05,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
 
-  const wallCapMaterial = new THREE.MeshStandardMaterial({
-    color: 0x334155, // Architectural dark slate wall cap
-    roughness: 0.4,
-    metalness: 0.2,
-  });
+    const cutawayWallMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfdfdfd,
+      roughness: 0.7,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.5,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
 
-  const doorWoodMaterial = new THREE.MeshStandardMaterial({
-    color: 0x854d0e, // Rich teak / walnut
-    roughness: 0.5,
-    metalness: 0.1,
-  });
+    const wallCapMaterial = new THREE.MeshStandardMaterial({
+      color: 0x334155, // Architectural dark slate wall cap
+      roughness: 0.4,
+      metalness: 0.2,
+    });
 
-  const doorHandleMaterial = new THREE.MeshStandardMaterial({
-    color: 0xd4af37, // Brass / gold handle
-    roughness: 0.2,
-    metalness: 0.9,
-  });
+    const doorWoodMaterial = new THREE.MeshStandardMaterial({
+      color: 0x854d0e, // Rich teak / walnut
+      roughness: 0.5,
+      metalness: 0.1,
+    });
 
-  const windowFrameMaterial = new THREE.MeshStandardMaterial({
-    color: 0x1e293b, // Dark anthracite powder-coated aluminum
-    roughness: 0.3,
-    metalness: 0.5,
-  });
+    const doorHandleMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd4af37, // Brass / gold handle
+      roughness: 0.2,
+      metalness: 0.9,
+    });
 
-  const glassMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x93c5fd, // Architectural semi-transparent light blue glass
-    transmission: 0.88,
-    opacity: 0.82,
-    transparent: true,
-    roughness: 0.08,
-    ior: 1.52,
-    thickness: 0.04,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.08,
-  });
+    const windowFrameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1e293b, // Dark anthracite powder-coated aluminum
+      roughness: 0.3,
+      metalness: 0.5,
+    });
 
-  return {
-    wallMaterial,
-    wallCapMaterial,
-    doorWoodMaterial,
-    doorHandleMaterial,
-    windowFrameMaterial,
-    glassMaterial,
-  };
+    // Lightweight transparent glass material avoiding MeshPhysicalMaterial transmission render-target copy overhead
+    const glassMaterial = new THREE.MeshStandardMaterial({
+      color: 0x93c5fd, // Architectural semi-transparent light blue glass
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.1,
+      metalness: 0.1,
+    });
+
+    cachedArchitecturalMaterials = {
+      wallMaterial,
+      cutawayWallMaterial,
+      wallCapMaterial,
+      doorWoodMaterial,
+      doorHandleMaterial,
+      windowFrameMaterial,
+      glassMaterial,
+    };
+  }
+
+  return cachedArchitecturalMaterials;
 }
 
 /**
@@ -304,34 +329,37 @@ export function generate3DFloorFromRoomPolygon(
   floorGeom.rotateX(-Math.PI / 2);
   floorGeom.computeVertexNormals();
 
-  // Create architectural material based on room type
-  let floorMaterial: THREE.Material;
-  const isDarkWood = roomType === 'office';
-  const isWood = roomType === 'living' || roomType === 'dining' || roomType === 'bedroom';
-  const isTile = roomType === 'kitchen' || roomType === 'bathroom';
+  // Create/retrieve architectural material based on room type from cache
+  let floorMaterial = floorMaterialCache.get(roomType);
+  if (!floorMaterial) {
+    const isDarkWood = roomType === 'office';
+    const isWood = roomType === 'living' || roomType === 'dining' || roomType === 'bedroom';
+    const isTile = roomType === 'kitchen' || roomType === 'bathroom';
 
-  if (isWood) {
-    const woodTex = createProceduralWoodTexture(isDarkWood);
-    woodTex.repeat.set(1.5, 1.5);
-    floorMaterial = new THREE.MeshStandardMaterial({
-      map: woodTex,
-      roughness: 0.45,
-      metalness: 0.05,
-    });
-  } else if (isTile) {
-    const tileTex = createProceduralTileTexture(roomType === 'bathroom');
-    tileTex.repeat.set(2, 2);
-    floorMaterial = new THREE.MeshStandardMaterial({
-      map: tileTex,
-      roughness: 0.3,
-      metalness: 0.1,
-    });
-  } else {
-    floorMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf1f5f9,
-      roughness: 0.6,
-      metalness: 0.05,
-    });
+    if (isWood) {
+      const woodTex = createProceduralWoodTexture(isDarkWood);
+      woodTex.repeat.set(1.5, 1.5);
+      floorMaterial = new THREE.MeshStandardMaterial({
+        map: woodTex,
+        roughness: 0.45,
+        metalness: 0.05,
+      });
+    } else if (isTile) {
+      const tileTex = createProceduralTileTexture(roomType === 'bathroom');
+      tileTex.repeat.set(2, 2);
+      floorMaterial = new THREE.MeshStandardMaterial({
+        map: tileTex,
+        roughness: 0.3,
+        metalness: 0.1,
+      });
+    } else {
+      floorMaterial = new THREE.MeshStandardMaterial({
+        color: 0xf1f5f9,
+        roughness: 0.6,
+        metalness: 0.05,
+      });
+    }
+    floorMaterialCache.set(roomType, floorMaterial);
   }
 
   const floorMesh = new THREE.Mesh(floorGeom, floorMaterial);

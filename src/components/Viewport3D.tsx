@@ -31,7 +31,7 @@ import {
   Grid,
 } from 'lucide-react';
 import { Node, Wall, WallOpening, ClosedRoom } from '../types';
-import { build3DArchitecturalModel } from '../utils/threeConversion';
+import { build3DArchitecturalModel, getArchitecturalMaterials } from '../utils/threeConversion';
 import { exportSceneToGLB } from '../utils/glbExport';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -510,16 +510,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     currentModelGroupRef.current = rootGroup;
     sceneRef.current.add(rootGroup);
 
-    // Apply cutaway mode opacity if enabled
+    // Apply cutaway mode opacity using shared cutaway material (zero material cloning overhead)
     if (cutawayMode) {
+      const { cutawayWallMaterial } = getArchitecturalMaterials();
       rootGroup.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
           const mesh = child as THREE.Mesh;
-          if (mesh.name.startsWith('Wall_') && mesh.material) {
-            const mat = (mesh.material as THREE.MeshStandardMaterial).clone();
-            mat.transparent = true;
-            mat.opacity = 0.5;
-            mesh.material = mat;
+          if (mesh.name.startsWith('Wall_')) {
+            mesh.material = cutawayWallMaterial;
           }
         }
       });
@@ -751,12 +749,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     });
 
-    // 3-Point Studio Lighting Rig
+    // 3-Point Studio Lighting Rig (1024x1024 optimized shadow map size for 4x VRAM saving & high FPS)
     const dirLight = new THREE.DirectionalLight(0xfff8ee, 1.6);
     dirLight.position.set(12, 18, 10);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
     dirLight.shadow.camera.near = 0.5;
     dirLight.shadow.camera.far = 50;
     dirLight.shadow.camera.left = -16;

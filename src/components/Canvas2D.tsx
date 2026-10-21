@@ -153,6 +153,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
   const [dragStartScreen, setDragStartScreen] = useState<Point>({ x: 0, y: 0 });
   const [dragStartPan, setDragStartPan] = useState<Point>({ x: 0, y: 0 });
   const didPanWithRightClickRef = useRef<boolean>(false);
+  const animFrameRef = useRef<number | null>(null);
 
   // Marquee Box Drag Selection in Select Tool
   const [isMarqueeDragging, setIsMarqueeDragging] = useState<boolean>(false);
@@ -2586,7 +2587,19 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
     }
 
     const world = screenToWorld(mouseScreenX, mouseScreenY);
-    setCursorWorldPos(world);
+
+    // Throttled cursorWorldPos update via requestAnimationFrame (max 1 state update per frame)
+    if (animFrameRef.current === null) {
+      animFrameRef.current = requestAnimationFrame(() => {
+        animFrameRef.current = null;
+        setCursorWorldPos((prev) => {
+          if (Math.abs(prev.x - world.x) < 0.001 && Math.abs(prev.y - world.y) < 0.001) {
+            return prev;
+          }
+          return world;
+        });
+      });
+    }
 
     // Handle Midpoint Curve Handle dragging for selected wall
     if (draggingMidHandleWallId) {
@@ -2642,7 +2655,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         break;
       }
     }
-    setHoveredNode(foundNode);
+    setHoveredNode((prev) => (prev?.id === foundNode?.id ? prev : foundNode));
 
     const nodeMap = new Map<string, Node>();
     nodes.forEach((n) => nodeMap.set(n.id, n));
@@ -2666,7 +2679,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         }
       }
     }
-    setHoveredOpening(foundOpening);
+    setHoveredOpening((prev) => (prev?.id === foundOpening?.id ? prev : foundOpening));
 
     // Opening Tools (Single Door, Double Door, Sliding Door, Window): Snap opening onto hovered wall
     if (isOpeningTool(activeTool)) {
@@ -2705,22 +2718,41 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
       }
 
       if (bestWall && bestN1 && bestN2) {
-        setHoveredOpeningWall({
-          wall: bestWall,
-          t: bestT,
-          point: bestPt,
-          n1: bestN1,
-          n2: bestN2,
-          type: activeTool,
+        const bWall = bestWall;
+        const bT = bestT;
+        const bPt = bestPt;
+        const bN1 = bestN1;
+        const bN2 = bestN2;
+        const aTool = activeTool;
+
+        setHoveredOpeningWall((prev) => {
+          if (
+            prev &&
+            prev.wall.id === bWall.id &&
+            prev.type === aTool &&
+            Math.abs(prev.t - bT) < 0.0005 &&
+            Math.abs(prev.point.x - bPt.x) < 0.01 &&
+            Math.abs(prev.point.y - bPt.y) < 0.01
+          ) {
+            return prev;
+          }
+          return {
+            wall: bWall,
+            t: bT,
+            point: bPt,
+            n1: bN1,
+            n2: bN2,
+            type: aTool,
+          };
         });
-        setHoveredWall(bestWall);
+        setHoveredWall((prev) => (prev?.id === bWall.id ? prev : bWall));
       } else {
-        setHoveredOpeningWall(null);
-        setHoveredWall(null);
+        setHoveredOpeningWall((prev) => (prev === null ? prev : null));
+        setHoveredWall((prev) => (prev === null ? prev : null));
       }
       return;
     } else {
-      setHoveredOpeningWall(null);
+      setHoveredOpeningWall((prev) => (prev === null ? prev : null));
     }
 
     // Hover detection for walls and closed room polygons
@@ -2757,17 +2789,18 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           }
         }
       }
-      setHoveredWall(foundWall);
+      setHoveredWall((prev) => (prev?.id === foundWall?.id ? prev : foundWall));
 
       if (!foundWall) {
         const room = closedRooms.find((r) => isPointInPolygon(world, r.points));
-        setHoveredRoomId(room ? room.id : null);
+        const roomId = room ? room.id : null;
+        setHoveredRoomId((prev) => (prev === roomId ? prev : roomId));
       } else {
-        setHoveredRoomId(null);
+        setHoveredRoomId((prev) => (prev === null ? prev : null));
       }
     } else {
-      setHoveredWall(null);
-      setHoveredRoomId(null);
+      setHoveredWall((prev) => (prev === null ? prev : null));
+      setHoveredRoomId((prev) => (prev === null ? prev : null));
     }
 
     // Detect hover on selected wall's midpoint curve handle
@@ -2813,11 +2846,12 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         break;
       }
     }
-    setHoveredMidHandleWallId(foundMidHandleWallId);
+    setHoveredMidHandleWallId((prev) => (prev === foundMidHandleWallId ? prev : foundMidHandleWallId));
 
     // Hover detection for wall dimension badges
     const badgeHit = checkDimensionBadgeClick(mouseScreenX, mouseScreenY);
-    setHoveredDimensionWallId(badgeHit ? badgeHit.wall.id : null);
+    const badgeWallId = badgeHit ? badgeHit.wall.id : null;
+    setHoveredDimensionWallId((prev) => (prev === badgeWallId ? prev : badgeWallId));
   };
 
   // Mouse Down
