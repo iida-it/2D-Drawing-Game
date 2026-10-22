@@ -1100,7 +1100,13 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
         const dx = n2.x - n1.x;
         const dy = n2.y - n1.y;
         const len = Math.hypot(dx, dy);
-        if (len > 1e-4) {
+
+        // Only show overall dynamic dimension if it is selected, hovered, or in edit mode to reduce clutter
+        const isDimHovered = hoveredDimensionWallId === w.id;
+        const isDimEditing = activeEditingDimension?.wallId === w.id;
+        const shouldShowDim = isSelected || isDimHovered || isDimEditing || isHovered;
+
+        if (len > 1e-4 && shouldShowDim) {
           const nx = -dy / len;
           const ny = dx / len;
           const offsetDist = 18 / zoom;
@@ -1126,9 +1132,7 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           });
 
           // Dimension pill badge
-          const isDimHovered = hoveredDimensionWallId === w.id;
-          const isDimEditing = activeEditingDimension?.wallId === w.id;
-          const dimText = isSelected ? `${formatMeters(wallDistMeters)} ✎` : formatMeters(wallDistMeters);
+          const dimText = isSelected || isDimHovered ? `${formatMeters(wallDistMeters)} ✎` : formatMeters(wallDistMeters);
           ctx.font = `600 ${Math.max(10, 11 / zoom)}px "Fira Code", monospace`;
           const metrics = ctx.measureText(dimText);
           const padX = 6 / zoom;
@@ -1461,86 +1465,91 @@ export const Canvas2D: React.FC<Canvas2DProps> = ({
           }
         });
 
-        // 3. Chain Dimensioning: Remaining wall margins & opening widths
-        const offsetDist = 20 / zoom;
-        const dimP1 = {
-          x: n1.x + breakdown.normal.x * offsetDist,
-          y: n1.y + breakdown.normal.y * offsetDist,
-        };
-        const dimP2 = {
-          x: n2.x + breakdown.normal.x * offsetDist,
-          y: n2.y + breakdown.normal.y * offsetDist,
-        };
+        // Only show detailed chain dimensioning when selected or hovered
+        const shouldShowDetailedDims = isSelected || isHovered || hoveredDimensionWallId === w.id || activeEditingDimension?.wallId === w.id;
 
-        // Continuous dimension line
-        ctx.strokeStyle = isSelected ? '#0284c7' : '#0ea5e9';
-        ctx.lineWidth = 1 / zoom;
-        ctx.beginPath();
-        ctx.moveTo(dimP1.x, dimP1.y);
-        ctx.lineTo(dimP2.x, dimP2.y);
-        ctx.stroke();
+        if (shouldShowDetailedDims) {
+          // 3. Chain Dimensioning: Remaining wall margins & opening widths
+          const offsetDist = 20 / zoom;
+          const dimP1 = {
+            x: n1.x + breakdown.normal.x * offsetDist,
+            y: n1.y + breakdown.normal.y * offsetDist,
+          };
+          const dimP2 = {
+            x: n2.x + breakdown.normal.x * offsetDist,
+            y: n2.y + breakdown.normal.y * offsetDist,
+          };
 
-        // End tick marks
-        const tickSize = 4 / zoom;
-        [dimP1, dimP2].forEach((p) => {
+          // Continuous dimension line
+          ctx.strokeStyle = isSelected ? '#0284c7' : '#0ea5e9';
+          ctx.lineWidth = 1 / zoom;
           ctx.beginPath();
-          ctx.moveTo(
-            p.x - breakdown.unitVec.x * tickSize,
-            p.y - breakdown.unitVec.y * tickSize
-          );
-          ctx.lineTo(
-            p.x + breakdown.unitVec.x * tickSize,
-            p.y + breakdown.unitVec.y * tickSize
-          );
+          ctx.moveTo(dimP1.x, dimP1.y);
+          ctx.lineTo(dimP2.x, dimP2.y);
           ctx.stroke();
-        });
 
-        // Interior ticks and margin badges
-        breakdown.marginDimensions.forEach((m) => {
-          [m.p1, m.p2].forEach((pt) => {
-            const ptOnDim = {
-              x: pt.x + breakdown.normal.x * offsetDist,
-              y: pt.y + breakdown.normal.y * offsetDist,
-            };
+          // End tick marks
+          const tickSize = 4 / zoom;
+          [dimP1, dimP2].forEach((p) => {
             ctx.beginPath();
             ctx.moveTo(
-              ptOnDim.x - breakdown.unitVec.x * tickSize,
-              ptOnDim.y - breakdown.unitVec.y * tickSize
+              p.x - breakdown.unitVec.x * tickSize,
+              p.y - breakdown.unitVec.y * tickSize
             );
             ctx.lineTo(
-              ptOnDim.x + breakdown.unitVec.x * tickSize,
-              ptOnDim.y + breakdown.unitVec.y * tickSize
+              p.x + breakdown.unitVec.x * tickSize,
+              p.y + breakdown.unitVec.y * tickSize
             );
-            ctx.strokeStyle = '#0ea5e9';
-            ctx.lineWidth = 1 / zoom;
             ctx.stroke();
           });
 
-          // Badge along margin
-          const dimMid = {
-            x: m.midPt.x + breakdown.normal.x * offsetDist,
-            y: m.midPt.y + breakdown.normal.y * offsetDist,
-          };
-          const text = m.subLabel ? `${m.label} [${m.subLabel}]` : m.label;
-          ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
-          const metrics = ctx.measureText(text);
-          const padX = 5 / zoom;
-          const badgeW = metrics.width + padX * 2;
-          const badgeH = 15 / zoom;
+          // Interior ticks and margin badges
+          breakdown.marginDimensions.forEach((m) => {
+            [m.p1, m.p2].forEach((pt) => {
+              const ptOnDim = {
+                x: pt.x + breakdown.normal.x * offsetDist,
+                y: pt.y + breakdown.normal.y * offsetDist,
+              };
+              ctx.beginPath();
+              ctx.moveTo(
+                ptOnDim.x - breakdown.unitVec.x * tickSize,
+                ptOnDim.y - breakdown.unitVec.y * tickSize
+              );
+              ctx.lineTo(
+                ptOnDim.x + breakdown.unitVec.x * tickSize,
+                ptOnDim.y + breakdown.unitVec.y * tickSize
+              );
+              ctx.strokeStyle = '#0ea5e9';
+              ctx.lineWidth = 1 / zoom;
+              ctx.stroke();
+            });
 
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.roundRect(dimMid.x - badgeW / 2, dimMid.y - badgeH / 2, badgeW, badgeH, 3 / zoom);
-          ctx.fill();
-          ctx.strokeStyle = m.type === 'opening' ? '#0284c7' : '#bae6fd';
-          ctx.lineWidth = 1 / zoom;
-          ctx.stroke();
+            // Badge along margin
+            const dimMid = {
+              x: m.midPt.x + breakdown.normal.x * offsetDist,
+              y: m.midPt.y + breakdown.normal.y * offsetDist,
+            };
+            const text = m.subLabel ? `${m.label} [${m.subLabel}]` : m.label;
+            ctx.font = `600 ${Math.max(9, 10 / zoom)}px "Fira Code", monospace`;
+            const metrics = ctx.measureText(text);
+            const padX = 5 / zoom;
+            const badgeW = metrics.width + padX * 2;
+            const badgeH = 15 / zoom;
 
-          ctx.fillStyle = m.type === 'opening' ? '#0284c7' : '#0369a1';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(text, dimMid.x, dimMid.y);
-        });
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.roundRect(dimMid.x - badgeW / 2, dimMid.y - badgeH / 2, badgeW, badgeH, 3 / zoom);
+            ctx.fill();
+            ctx.strokeStyle = m.type === 'opening' ? '#0284c7' : '#bae6fd';
+            ctx.lineWidth = 1 / zoom;
+            ctx.stroke();
+
+            ctx.fillStyle = m.type === 'opening' ? '#0284c7' : '#0369a1';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, dimMid.x, dimMid.y);
+          });
+        }
 
         // 4. Overall Total Wall Dimension line & badge when selected or hovered
         if (isSelected || hoveredDimensionWallId === w.id) {
