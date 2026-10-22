@@ -248,6 +248,9 @@ export default function App() {
       setToastNotification(
         `${label} (${(widthMeters || defaultWidth).toFixed(2)}m) placed on wall.`
       );
+
+      // Fix for duplicate 3D doors bug: Switch tool after placement so repeated clicks don't double place
+      setActiveTool('select');
     },
     [openings, nodes, walls, pushHistory]
   );
